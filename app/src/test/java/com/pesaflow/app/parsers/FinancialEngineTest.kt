@@ -62,11 +62,17 @@ class FinancialEngineTest {
         incomeSources = sources, profile = profile
     )
 
-    private fun bill(name: String, amount: Double, dueInDays: Int, status: String = "UNPAID") =
+    private fun bill(
+        name: String,
+        amount: Double,
+        dueInDays: Int,
+        status: String = "UNPAID",
+        category: String = "Bills"
+    ) =
         Bill(
             name = name, amount = amount,
             dueDate = System.currentTimeMillis() + dueInDays * 24L * 60 * 60 * 1000,
-            category = "Bills", status = status
+            category = category, status = status
         )
 
     private fun debtOwed(person: String, amount: Double) = Debt(
@@ -207,6 +213,47 @@ class FinancialEngineTest {
         val bare = buildSnapshot(base())
         assertEquals(Money.ZERO, bare.helbFeesCovered)
         assertEquals(Money.ZERO, bare.helbUpkeep)
+    }
+
+    @Test
+    fun `tracked semester fee is not reserved again from profile`() {
+        val s = buildSnapshot(
+            base(bills = listOf(bill("Semester fees", 32000.0, 60, category = "School")))
+                .copy(helbExpected = 25100.0, feesAmount = 32000.0)
+        )
+        assertEquals(Money.of(32000.0), s.upcomingBillsTotal)
+        assertEquals(Money.ZERO, s.upcomingFees)
+        assertEquals(Money.of(32000.0), s.committed)
+    }
+
+    @Test
+    fun `coffee bill does not replace the profile fee reserve`() {
+        val s = buildSnapshot(
+            base(bills = listOf(bill("Coffee", 500.0, 5)))
+                .copy(helbExpected = 25100.0, feesAmount = 32000.0)
+        )
+        assertEquals(Money.of(6900.0), s.upcomingFees)
+    }
+
+    @Test
+    fun `safe semester does not subtract commitments a second time`() {
+        val s = buildSnapshot(
+            base(
+                txs = listOf(tx(100000.0, TransactionType.INCOME, "Salary", "Employer")),
+                bills = listOf(bill("Rent", 5000.0, 10)),
+                goals = listOf(
+                    SavingsGoal(
+                        title = "Laptop",
+                        targetAmount = 20000.0,
+                        currentAmount = 0.0,
+                        targetTimestamp = System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000
+                    )
+                )
+            ).copy(feesAmount = 10000.0)
+        )
+
+        assertEquals(Money.of(65000.0), s.flexible)
+        assertEquals(s.flexible, s.safeSemester)
     }
 
     // §19 — scenarios stay ordered favourable >= typical >= cautious.

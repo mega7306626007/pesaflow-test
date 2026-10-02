@@ -136,7 +136,7 @@ fun predictPaydays(
     now: Long = System.currentTimeMillis()
 ): List<Triple<String, Double, Long>> {
     val dayMs = 24L * 60 * 60 * 1000
-    return txs.filter { it.type == TransactionType.INCOME && !it.isSample }
+    return txs.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }
         .groupBy { it.merchant.trim().lowercase() }
         .mapNotNull { (_, list) ->
             if (list.size < 2) return@mapNotNull null

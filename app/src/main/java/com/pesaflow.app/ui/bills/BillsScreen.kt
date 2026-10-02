@@ -47,7 +47,13 @@ fun BillsScreen(viewModel: FinanceViewModel) {
         acked = acked + key
         ackScope.launch { kotlinx.coroutines.delay(2000); acked = acked - key }
     }
-    val repeats = remember(transactions) { detectRepeats(transactions) }
+    // Single repeats computation (was duplicated with a shadow warning):
+    // detected rhythms minus names already tracked as open bills.
+    val repeats = remember(transactions, bills) {
+        detectRepeats(transactions).filter { hit ->
+            bills.none { it.status != "PAID" && it.name.equals(hit.label, ignoreCase = true) }
+        }.take(5)
+    }
 
     val upcoming = bills.filter { it.status != "PAID" }
     val recurring = bills.filter { it.frequency != "ONE_TIME" && it.status != "PAID" }
@@ -136,6 +142,53 @@ fun BillsScreen(viewModel: FinanceViewModel) {
                                     },
                                     enabled = billKey !in acked
                                 ) { Text(if (billKey in acked) "Tracked ✓" else "+ Bill", color = MaterialTheme.colorScheme.primary) }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+                    }
+                }
+            }
+            // Spotted payments: confirmed ledger rows that look like open bills
+            // (amount + window + name). Suggest-only — tapping links the row so
+            // projections stop reserving it. Undo reopens, keeps your row.
+            val spotted = remember(transactions, bills) {
+                com.pesaflow.app.data.finance.matchBillPayments(
+                    bills.filter { matchesBill(it) }, transactions
+                ).take(3)
+            }
+            if (spotted.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text("Spotted payments 💡", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("These ledger rows look like open bills — link one and the reserve releases.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        spotted.forEach { m ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(m.bill.name, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                                    Text(
+                                        "KSh ${m.tx.amount.toInt()} · ${m.tx.merchant} — looks paid",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                val spotKey = "${m.bill.id}|${m.tx.id}"
+                                TextButton(
+                                    onClick = {
+                                        viewModel.linkBillPayment(m.bill.id, m.tx.id)
+                                        ack(spotKey)
+                                        scope.launch {
+                                            val r = snackbar.showSnackbar("Linked — ${m.bill.name} settled.", "Undo", duration = SnackbarDuration.Short)
+                                            if (r == SnackbarResult.ActionPerformed) viewModel.reopenBill(m.bill.id)
+                                        }
+                                    },
+                                    enabled = spotKey !in acked
+                                ) { Text(if (spotKey in acked) "Linked ✓" else "Mark paid", color = MaterialTheme.colorScheme.primary) }
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                         }
@@ -368,6 +421,8 @@ fun BillsScreen(viewModel: FinanceViewModel) {
         var editAmount by remember(bill.id) { mutableStateOf(if (bill.amount % 1.0 == 0.0) bill.amount.toInt().toString() else bill.amount.toString()) }
         var editCategory by remember(bill.id) { mutableStateOf(bill.category) }
         var editFrequency by remember(bill.id) { mutableStateOf(bill.frequency) }
+        var editPaybill by remember(bill.id) { mutableStateOf(bill.paybill) }
+        var editPaidBy by remember(bill.id) { mutableStateOf(bill.paidBy) }
         val editValid = editName.isNotBlank() && (editAmount.toDoubleOrNull() ?: 0.0) > 0
         AlertDialog(
             onDismissRequest = { editingBill = null },
@@ -377,6 +432,8 @@ fun BillsScreen(viewModel: FinanceViewModel) {
                     OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("Bill name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = editAmount, onValueChange = { editAmount = it }, label = { Text("Amount (KSh)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = editCategory, onValueChange = { editCategory = it }, label = { Text("Category") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = editPaybill, onValueChange = { editPaybill = it }, label = { Text("Paybill / till (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    BillPayerPicker(editPaidBy) { editPaidBy = it }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("ONE_TIME", "WEEKLY", "MONTHLY").forEach { f ->
                             FilterChip(selected = editFrequency == f, onClick = { editFrequency = f }, label = { Text(f.take(5)) })
@@ -392,7 +449,7 @@ fun BillsScreen(viewModel: FinanceViewModel) {
                     enabled = editValid,
                     onClick = {
                         val amt = editAmount.toDoubleOrNull() ?: return@Button
-                        viewModel.updateBillDetails(bill, editName.trim(), amt, editCategory.trim().ifEmpty { "Other" }, editFrequency)
+                        viewModel.updateBillDetails(bill, editName.trim(), amt, editCategory.trim().ifEmpty { "Other" }, editFrequency, editPaybill, editPaidBy)
                         editingBill = null
                     }
                 ) { Text("Save changes") }
@@ -406,7 +463,9 @@ fun BillsScreen(viewModel: FinanceViewModel) {
         var amount by remember { mutableStateOf("") }
         var category by remember { mutableStateOf("Rent") }
         var daysUntilDue by remember { mutableStateOf("7") }
+        var paybill by remember { mutableStateOf("") }
         var frequency by remember { mutableStateOf("ONE_TIME") }
+        var paidBy by remember { mutableStateOf("ME") }
         val frequencies = listOf("ONE_TIME", "WEEKLY", "MONTHLY")
 
         AlertDialog(
@@ -418,6 +477,8 @@ fun BillsScreen(viewModel: FinanceViewModel) {
                     OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Amount (KSh)") })
                     OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") })
                     OutlinedTextField(value = daysUntilDue, onValueChange = { daysUntilDue = it }, label = { Text("Due in (days)") })
+                    OutlinedTextField(value = paybill, onValueChange = { paybill = it }, label = { Text("Paybill / till (optional)") })
+                    BillPayerPicker(paidBy) { paidBy = it }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         frequencies.forEach { f ->
                             FilterChip(
@@ -435,13 +496,49 @@ fun BillsScreen(viewModel: FinanceViewModel) {
                     val days = daysUntilDue.toIntOrNull()
                     if (name.isNotBlank() && amt != null && amt > 0 && days != null) {
                         val due = System.currentTimeMillis() + days.coerceAtLeast(0) * 24L * 60 * 60 * 1000
-                        viewModel.addBill(name.trim(), amt, due, category.trim().ifEmpty { "Other" }, frequency)
+                        viewModel.addBill(name.trim(), amt, due, category.trim().ifEmpty { "Other" }, frequency, paybill, paidBy)
                         showAddDialog = false
                     }
                 }) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { showAddDialog = false }) { Text("Cancel") } }
         )
+    }
+}
+
+private val billPayerOptions = listOf(
+    "ME" to "Me",
+    "PARENTS" to "Parents",
+    "SPONSOR" to "Sponsor",
+    "HELB" to "HELB",
+    "OTHER" to "Other"
+)
+
+private fun billPayerLabel(paidBy: String): String =
+    billPayerOptions.firstOrNull { it.first == paidBy }?.second ?: "Me"
+
+@Composable
+private fun BillPayerPicker(selected: String, onSelected: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text("Who pays this bill?", style = MaterialTheme.typography.labelMedium)
+        Text(
+            "Only bills marked Me reduce your safe-to-spend amount.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        billPayerOptions.chunked(2).forEach { rowOptions ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                rowOptions.forEach { (value, label) ->
+                    FilterChip(
+                        selected = selected == value,
+                        onClick = { onSelected(value) },
+                        label = { Text(label) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (rowOptions.size == 1) Spacer(modifier = Modifier.weight(1f))
+            }
+        }
     }
 }
 
@@ -485,6 +582,11 @@ fun BillCard(bill: Bill, onPaid: () -> Unit, onDelete: () -> Unit, onEdit: () ->
                         color = if (overdueDays >= 0) com.pesaflow.app.ui.theme.ppColors.error
                         else com.pesaflow.app.ui.theme.ppColors.textPrimary
                     )
+                    Text(
+                        "Paid by ${billPayerLabel(bill.paidBy)}",
+                        style = com.pesaflow.app.ui.theme.ppTypography.bodySmall,
+                        color = com.pesaflow.app.ui.theme.ppColors.textTertiary
+                    )
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
@@ -515,6 +617,16 @@ fun BillCard(bill: Bill, onPaid: () -> Unit, onDelete: () -> Unit, onEdit: () ->
 
             if (isExpanded) {
                 Spacer(modifier = Modifier.height(8.dp))
+                if (bill.paybill.isNotBlank()) {
+                    Text(
+                        "Paybill ${bill.paybill} — pay this number via M-Pesa",
+                        style = com.pesaflow.app.ui.theme.ppTypography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = com.pesaflow.app.ui.theme.ppColors.brightBlue,
+                        modifier = Modifier.fillMaxWidth().padding(16.dp, 0.dp, 16.dp, 0.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(16.dp, 0.dp, 16.dp, 0.dp),
                     horizontalArrangement = Arrangement.SpaceBetween

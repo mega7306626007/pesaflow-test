@@ -225,7 +225,8 @@ fun PesaLoadingRow(modifier: Modifier = Modifier) {
     }
 }
 
-// Consistent category treatment: one container style, one size, tinted by theme.
+// Consistent category treatment: one container style, one size — tinted by
+// the category's own chart color, so lists and charts speak one language.
 // Emoji content is preserved from existing data (no new asset pipeline, offline-safe).
 @Composable
 fun CategoryIcon(
@@ -234,7 +235,7 @@ fun CategoryIcon(
     accent: Boolean = false
 ) {
     val container = if (accent) MaterialTheme.colorScheme.primaryContainer
-    else MaterialTheme.colorScheme.surfaceVariant
+    else categoryChartColor(category).copy(alpha = 0.16f)
     val content = if (accent) MaterialTheme.colorScheme.onPrimaryContainer
     else MaterialTheme.colorScheme.onSurfaceVariant
     Box(

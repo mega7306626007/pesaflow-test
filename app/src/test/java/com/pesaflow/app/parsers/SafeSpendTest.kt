@@ -1,4 +1,4 @@
-package com.pesaflow.app.parsers
+﻿package com.pesaflow.app.parsers
 
 import com.pesaflow.app.data.finance.Commute
 import com.pesaflow.app.data.finance.Money
@@ -115,5 +115,46 @@ class SafeSpendTest {
         assertTrue(heavy.safeToday < light.safeToday)
         assertTrue(heavy.safeToday >= Money.ZERO)
         assertTrue(light.safeToday <= light.liquid)
+    }
+
+    // Overdrawn ledger reads negative liquid, never a fake zero: "Held 0"
+    // next to "Ledger -32,800" broke trust in every number on the screen.
+    @Test
+    fun `negative liquid stays negative for honesty`() {
+        val s = snap(txs = listOf(tx(32800.0, TransactionType.EXPENSE, "Food")))
+        assertEquals(Money.of(-32800.0), s.liquid)
+        assertEquals(Money.ZERO, s.flexible)
+    }
+
+    // Weekly allowance is exactly the target: last week never doubles it.
+    @Test
+    fun `weekly allowance ignores last week spend`() {
+        assertEquals(3000, com.pesaflow.app.ui.dashboard.weeklyAllowance(3000))
+        assertEquals(0, com.pesaflow.app.ui.dashboard.weeklyAllowance(0))
+        assertEquals(0, com.pesaflow.app.ui.dashboard.weeklyAllowance(-50))
+    }
+
+    // Bills reserve covers the next 30 days only: December fees must not eat
+    // October's allowance (that fabricated "bills eat 320% of budget").
+    @Test
+    fun `far future bills wait their turn`() {
+        val now = System.currentTimeMillis()
+        val day = 24L * 60 * 60 * 1000
+        fun bill(name: String, amount: Double, dueInDays: Long, status: String = "UNPAID") =
+            com.pesaflow.app.data.models.Bill(
+                name = name, amount = amount,
+                dueDate = now + dueInDays * day, category = "Bills", status = status
+            )
+        // Rent due in 5 days + overdue electricity: reserved. December fees
+        // (+90d) and already-paid rows: ignored.
+        val bills = listOf(
+            bill("Rent", 8000.0, 5),
+            bill("KPLC", 1500.0, -2),
+            bill("Fees", 20000.0, 90),
+            bill("Old", 5000.0, 5, status = "PAID")
+        )
+        // (8000 + 1500) / 30 = 316/day — fees and paid rows contribute zero.
+        assertEquals(316, com.pesaflow.app.ui.dashboard.reserveBillDaily(bills, now))
+        assertEquals(0, com.pesaflow.app.ui.dashboard.reserveBillDaily(emptyList(), now))
     }
 }

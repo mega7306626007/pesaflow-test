@@ -98,7 +98,9 @@ watched: Set<String> = emptySet()
     }
     val monthExp = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && inMonth(it.dateTimestamp) }
     val monthTotal = monthExp.sumOf { it.amount }
-    val monthIncome = txs.filter { it.type == TransactionType.INCOME && !it.isSample && inMonth(it.dateTimestamp) }.sumOf { it.amount }
+    // Earned income only — onboarding opening rows are held cash, and counting
+    // them here broke the overspend alarm + savings rate every onboarding month.
+    val monthIncome = txs.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening && inMonth(it.dateTimestamp) }.sumOf { it.amount }
     if (monthTotal <= 0) return listOf(t(
         "No spending this month yet.",
         "Hujaspend this month.",
@@ -121,7 +123,7 @@ watched: Set<String> = emptySet()
     // data stays silent — the engine only speaks with 5+ rows and 35%+.
     com.pesaflow.app.data.analytics.hourlyPeak(
         txs.filter { !it.isSample }.map {
-            com.pesaflow.app.data.parsers.LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp)
+            com.pesaflow.app.data.parsers.LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp, it.isSample, it.isOpening)
         }
     )?.let { hp ->
         val h = com.pesaflow.app.data.analytics.hourLabel(hp.peakStartHour)
@@ -135,7 +137,7 @@ watched: Set<String> = emptySet()
     // the spending until the next one — no double-counting.
     com.pesaflow.app.data.analytics.paydaySplurge(
         txs.filter { !it.isSample }.map {
-            com.pesaflow.app.data.parsers.LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp)
+            com.pesaflow.app.data.parsers.LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp, it.isSample, it.isOpening)
         }
     )?.let { splurge ->
         if (splurge.paydays >= 2 && splurge.avgPctSpent7d >= 60) {
@@ -408,7 +410,7 @@ watched: Set<String> = emptySet()
             val calB = java.util.Calendar.getInstance()
             val domB = calB.get(java.util.Calendar.DAY_OF_MONTH)
             val paceB = monthTotal / domB.coerceAtLeast(1)
-            val billsB = bills.filter { it.status != "PAID" }.sumOf { it.amount }
+            val billsB = bills.filter { it.status != "PAID" && it.paidBy == "ME" }.sumOf { it.amount }
             val fc = monthEndForecast(monthTotal, paceB, heldBalance, billsB)
             val broke = fc.brokeDay
             if (broke != null && broke > domB) {
@@ -452,7 +454,7 @@ watched: Set<String> = emptySet()
         val projection = com.pesaflow.app.data.finance.projectCashFlow(
             balance, nowMs, 30,
             paydays = com.pesaflow.app.data.analytics.predictPaydays(txs, nowMs),
-            bills = bills.filter { it.status != "PAID" },
+            bills = bills.filter { it.status != "PAID" && it.paidBy == "ME" },
             recurring = com.pesaflow.app.data.analytics.detectRecurring(txs)
         )
         val fmt = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
@@ -531,7 +533,7 @@ watched: Set<String> = emptySet()
     }
 
     // Open bills — nearest due date first, overdue flagged by days.
-    val openBills = bills.filter { it.status != "PAID" }
+    val openBills = bills.filter { it.status != "PAID" && it.paidBy == "ME" }
     if (openBills.isNotEmpty()) {
         val nowMsB = System.currentTimeMillis()
         val dayMs = 24L * 60 * 60 * 1000

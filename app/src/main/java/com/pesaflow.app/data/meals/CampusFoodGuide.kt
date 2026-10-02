@@ -21,6 +21,22 @@ data class CampusRent(
     val verified: Boolean = false
 )
 
+// Daily-allowance tiers: what kind of eating day the food budget buys.
+// Pure, unit-tested; the planner shows the tier next to the daily figure.
+enum class MealTier { COMFORT, BALANCED, STRETCH }
+
+fun mealTier(dailyAllowance: Double): MealTier = when {
+    dailyAllowance >= 400 -> MealTier.COMFORT
+    dailyAllowance >= 150 -> MealTier.BALANCED
+    else -> MealTier.STRETCH
+}
+
+fun mealTierLabel(tier: MealTier): String = when (tier) {
+    MealTier.COMFORT -> "Comfort plates 🍛 — balanced picks all day"
+    MealTier.BALANCED -> "Balanced plates 🍲 — kibanda-smart all day"
+    MealTier.STRETCH -> "Stretch + kitchen stock 🫙 — staples carry you"
+}
+
 private fun plates(uni: String, spot: String) = listOf(
     CampusSpot(uni, spot, "Smocha", 70.0, "Lunch", "Complete"),
     CampusSpot(uni, spot, "Githeri", 50.0, "Lunch", "Complete"),

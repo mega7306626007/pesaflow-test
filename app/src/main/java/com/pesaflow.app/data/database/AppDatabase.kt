@@ -7,13 +7,15 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.TypeConverters
+import com.pesaflow.app.data.context.ContextFact
 import com.pesaflow.app.data.income.IncomeSource
 import com.pesaflow.app.data.models.*
+import com.pesaflow.app.data.places.Place
 
 
 @Database(
-    entities = [Transaction::class, PendingTransaction::class, Budget::class, SavingsGoal::class, UniversityProfile::class, Bill::class, Debt::class, MealItem::class, ChamaGroup::class, Belonging::class, KitchenStock::class, UserRhythm::class, MoneyAccount::class, IncomeSource::class, FinancialProfile::class],
-    version = 17,
+    entities = [Transaction::class, PendingTransaction::class, Budget::class, SavingsGoal::class, UniversityProfile::class, Bill::class, Debt::class, MealItem::class, ChamaGroup::class, Belonging::class, KitchenStock::class, UserRhythm::class, MoneyAccount::class, IncomeSource::class, FinancialProfile::class, ContextFact::class, Place::class],
+    version = 22,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -33,6 +35,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun moneyAccountDao(): MoneyAccountDao
     abstract fun incomeSourceDao(): IncomeSourceDao
     abstract fun financialProfileDao(): FinancialProfileDao
+    abstract fun userContextDao(): UserContextDao
+    abstract fun placeDao(): PlaceDao
 
 
     companion object {
@@ -58,7 +62,35 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE TABLE IF NOT EXISTS user_rhythms (id TEXT NOT NULL PRIMARY KEY, kind TEXT NOT NULL, category TEXT NOT NULL, confidence REAL NOT NULL, hint TEXT NOT NULL, dayOfMonth INTEGER NOT NULL, amount REAL NOT NULL, sourceCode TEXT NOT NULL, confirmed INTEGER NOT NULL, dismissed INTEGER NOT NULL, createdAt INTEGER NOT NULL)")
             }
         }
-        // Phase 7 profile: multidimensional declared truth, one singleton row.
+        // Bill paybills: which M-Pesa number clears it (watchtower directory).
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE bills ADD COLUMN paybill TEXT NOT NULL DEFAULT ''")
+            }
+        }
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE university_profiles ADD COLUMN programme TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE university_profiles ADD COLUMN yearOfStudy TEXT NOT NULL DEFAULT ''")
+            }
+        }
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE bills ADD COLUMN paidBy TEXT NOT NULL DEFAULT 'ME'")
+            }
+        }
+        // Phase 8 places catalogue: user-entered local knowledge first.
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS places (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'FOOD_OUTLET', area TEXT NOT NULL DEFAULT '', priceMin REAL NOT NULL DEFAULT 0.0, priceMax REAL NOT NULL DEFAULT 0.0, note TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'USER_ENTERED', verifiedAt INTEGER NOT NULL DEFAULT 0, updatedAt INTEGER NOT NULL DEFAULT 0)")
+            }
+        }
+        // Phase 8 user context: explicit fact graph with provenance.
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS user_context (`key` TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'USER_ENTERED', confidence REAL NOT NULL DEFAULT 1.0, createdAt INTEGER NOT NULL DEFAULT 0, updatedAt INTEGER NOT NULL DEFAULT 0, expiresAt INTEGER NOT NULL DEFAULT 0, userConfirmed INTEGER NOT NULL DEFAULT 0)")
+            }
+        }
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS financial_profile (id TEXT NOT NULL PRIMARY KEY, housing TEXT NOT NULL, commute TEXT NOT NULL, food TEXT NOT NULL, household TEXT NOT NULL, incomeStability TEXT NOT NULL, incomeKindsCsv TEXT NOT NULL, academic TEXT NOT NULL, debtLevel TEXT NOT NULL, savingsPressure TEXT NOT NULL, risk TEXT NOT NULL, roommates INTEGER NOT NULL, rentShare REAL NOT NULL, utilityShare REAL NOT NULL, commuteDays INTEGER NOT NULL, cookingDays INTEGER NOT NULL, dependants INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
@@ -98,7 +130,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "pesaflow_secure_db"
-                ).addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17).fallbackToDestructiveMigration().build()
+                ).addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
             }

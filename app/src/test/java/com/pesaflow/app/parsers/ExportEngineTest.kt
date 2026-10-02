@@ -59,10 +59,34 @@ class ExportEngineTest {
     @Test
     fun `csvHasDebtSection`() {
         val engine = ExportEngine()
-        val d = Debt(person = "John", amount = 2000.0, dateBorrowed = System.currentTimeMillis(), dueDate = System.currentTimeMillis() + 30 * 86400000, description = "Loan", status = "OWING", direction = "I_OWE")
+        val d = Debt(person = "John", amount = 2000.0, dateBorrowed = System.currentTimeMillis(), dueDate = System.currentTimeMillis() + 30L * 86400000L, description = "Loan", status = "OWING", direction = "I_OWE")
         val csv = engine.exportCsv(listOf(txn), emptyList(), emptyList(), emptyList(), listOf(d))
         assertTrue(csv.contains("# DEBTS"))
         assertTrue(csv.contains("John"))
+    }
+
+    @Test
+    fun `csvIncludesStudentUniversityProfile`() {
+        val profile = UniversityProfile(
+            universityName = "University of Nairobi",
+            campus = "Chiromo",
+            programme = "Computer Science",
+            yearOfStudy = "Year 2",
+            currentSemester = 2,
+            academicYear = "2026/2027",
+            startingFunding = 25000.0,
+            helbExpected = 18000.0,
+            feesAmount = 32000.0
+        )
+
+        val csv = ExportEngine().exportCsv(emptyList(), profile = profile)
+
+        assertTrue(csv.contains("# UNIVERSITY PROFILE"))
+        assertTrue(csv.contains("\"university\",\"University of Nairobi\""))
+        assertTrue(csv.contains("\"campus\",\"Chiromo\""))
+        assertTrue(csv.contains("\"programme\",\"Computer Science\""))
+        assertTrue(csv.contains("\"year_of_study\",\"Year 2\""))
+        assertTrue(csv.contains("\"fees_amount_ksh\",\"32000.0\""))
     }
 
     @Test

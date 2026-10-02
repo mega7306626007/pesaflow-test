@@ -1,6 +1,7 @@
 package com.pesaflow.app
 
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -55,6 +56,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -226,6 +228,17 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
     var quickAddType by remember { mutableStateOf<TransactionType?>(null) }
     var importResult by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+    val demoPrefs = remember(context) {
+        context.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
+    }
+    var demoMode by remember(demoPrefs) { mutableStateOf(demoPrefs.getBoolean("demo_mode", false)) }
+    DisposableEffect(demoPrefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "demo_mode") demoMode = demoPrefs.getBoolean("demo_mode", false)
+        }
+        demoPrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { demoPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
     val csvPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             try {
@@ -292,6 +305,30 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
 
 
     Scaffold(
+        topBar = {
+            if (demoMode) {
+                androidx.compose.material3.Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer
+                ) {
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "DEMO MODE",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Text(
+                            "Sample data only — not your financial records.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                }
+            }
+        },
         floatingActionButton = {
             // The + lives on Home and Transactions only — it must not follow
             // the user onto Budgets, Insights or More.
@@ -365,6 +402,9 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
                     })
                     NavRoutes.MEALS -> MealPlannerScreen(viewModel = viewModel)
                     NavRoutes.BILLS -> BillsScreen(viewModel = viewModel)
+                    // More → Budgets was a dead tap (no branch → fell back to
+                    // the More list). Same screen as the Budgets tab.
+                    NavRoutes.BUDGETS -> BudgetsScreen(viewModel = viewModel)
                     NavRoutes.INCOME -> IncomeScreen(viewModel = viewModel)
                     NavRoutes.BUDDY -> PesaBuddyAssistant(viewModel = viewModel)
                     NavRoutes.NETWORTH -> NetWorthScreen(viewModel = viewModel)
@@ -559,5 +599,3 @@ private fun MoreRow(icon: ImageVector, title: String, subtitle: String, onClick:
         )
     }
 }
-
-

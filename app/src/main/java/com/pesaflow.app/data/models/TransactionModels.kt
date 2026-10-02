@@ -122,6 +122,8 @@ data class UniversityProfile(
     @PrimaryKey val id: String = "SINGLETON_USER_PROFILE",
     val universityName: String = "",
     val campus: String = "",
+    val programme: String = "",
+    val yearOfStudy: String = "",
     val currentSemester: Int = 1,
     val academicYear: String = "",
     val semesterStartTimestamp: Long = 0L,
@@ -160,7 +162,9 @@ data class Bill(
     val reminderEnabled: Boolean = false,
     val reminderLeadDays: Int = 3,
     val linkedPaymentId: String? = null, // ledger row that actually paid it; null = unpaid
-    val amountRemaining: Double = 0.0 // >0 = remainder owed; 0 = full amount (legacy/unsplit)
+    val amountRemaining: Double = 0.0, // >0 = remainder owed; 0 = full amount (legacy/unsplit)
+    val paybill: String = "", // M-Pesa paybill / till to pay it; "" = cash or unknown
+    val paidBy: String = "ME" // ME, PARENTS, SPONSOR, HELB, OTHER
 )
 
 

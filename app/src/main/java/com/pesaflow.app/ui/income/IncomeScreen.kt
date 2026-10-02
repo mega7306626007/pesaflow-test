@@ -128,6 +128,20 @@ fun IncomeScreen(viewModel: FinanceViewModel) {
                                 )
                             }
                         }
+                        // Dynamic horizon: nearest dated inflow counts the days.
+                        val nextSrc = remember(sources) {
+                            sources.filter { it.frequency == "MONTHLY" && it.dayOfMonth in 1..31 }
+                                .minByOrNull { it.daysUntilLanding() ?: Int.MAX_VALUE }
+                        }
+                        nextSrc?.daysUntilLanding()?.let { days ->
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Next: ${nextSrc.label.ifBlank { nextSrc.displayKind() }} in $days day${if (days == 1) "" else "s"} 📥",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(
                             progress = { pace },

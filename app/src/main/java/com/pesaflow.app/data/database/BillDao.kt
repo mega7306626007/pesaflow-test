@@ -48,7 +48,7 @@ interface BillDao {
     suspend fun deleteAllBills()
 
 
-    @Query("UPDATE bills SET amount = :amount, dueDate = :dueDate, category = :category, frequency = :frequency, reminderEnabled = :reminder, reminderLeadDays = :leadDays WHERE id = :id")
+    @Query("UPDATE bills SET amount = :amount, dueDate = :dueDate, category = :category, frequency = :frequency, reminderEnabled = :reminder, reminderLeadDays = :leadDays, paidBy = :paidBy WHERE id = :id")
     suspend fun updateBill(
         id: String,
         amount: Double,
@@ -56,7 +56,8 @@ interface BillDao {
         category: String,
         frequency: String,
         reminder: Boolean,
-        leadDays: Int
+        leadDays: Int,
+        paidBy: String
     )
 
 
@@ -78,4 +79,8 @@ interface BillDao {
 
     @Query("UPDATE bills SET status = 'UNPAID', linkedPaymentId = NULL, amountRemaining = :amount WHERE id = :id")
     suspend fun reopenBillWith(id: String, amount: Double)
+
+
+    @Query("UPDATE bills SET paybill = :paybill WHERE id = :id")
+    suspend fun updateBillPaybill(id: String, paybill: String)
 }

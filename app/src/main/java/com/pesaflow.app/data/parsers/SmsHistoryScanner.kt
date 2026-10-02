@@ -49,12 +49,13 @@ suspend fun scanRecentSms(
     // between pages; partial results still return.
     pageSize: Int = 150,
     onProgress: (found: Int, parsed: Int) -> Unit = { _, _ -> },
-    isCancelled: () -> Boolean = { false }
+    isCancelled: () -> Boolean = { false },
+    sinceTimestamp: Long? = null
 ): SmsScanResult {
     if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
         return SmsScanResult()
     }
-    val since = System.currentTimeMillis() - daysBack * 24L * 60 * 60 * 1000
+    val since = sinceTimestamp ?: System.currentTimeMillis() - daysBack * 24L * 60 * 60 * 1000
     val parsed = mutableListOf<PendingTransaction>()
     var found = 0
     var unreadable = 0

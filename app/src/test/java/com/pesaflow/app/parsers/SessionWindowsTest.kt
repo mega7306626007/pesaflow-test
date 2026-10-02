@@ -6,9 +6,7 @@ import com.pesaflow.app.data.models.TransactionSource
 import com.pesaflow.app.data.models.TransactionType
 import com.pesaflow.app.data.parsers.Regime
 import com.pesaflow.app.data.parsers.SessionWindow
-import com.pesaflow.app.data.parsers.UNIVERSITY_DEFAULTS
 import com.pesaflow.app.data.parsers.detectBreakMonths
-import com.pesaflow.app.data.parsers.guessSemesterStart
 import com.pesaflow.app.data.parsers.monthlyTransportSeries
 import com.pesaflow.app.data.parsers.resolveCalendar
 import com.pesaflow.app.data.parsers.summarizeByRegime
@@ -79,6 +77,7 @@ class SessionWindowsTest {
     fun `empty dates degrade to pre-uni never session`() {
         val cal = resolveCalendar(0L, 0L)
         assertEquals(Regime.PRE_UNI, cal.regimeOf(ms(2026, 10, 15)))
+        assertTrue(cal.sessionSpans.isEmpty())
     }
 
     @Test
@@ -99,18 +98,6 @@ class SessionWindowsTest {
     }
 
     @Test
-    fun `defaults table is sane`() {
-        assertTrue(UNIVERSITY_DEFAULTS.size >= 15)
-        assertEquals(UNIVERSITY_DEFAULTS.size, UNIVERSITY_DEFAULTS.map { it.name }.toSet().size)
-        UNIVERSITY_DEFAULTS.forEach {
-            assertTrue(it.startMonth in 1..12)
-            assertTrue(it.endMonth in 1..12)
-            assertTrue(it.startDay in 1..31)
-            assertTrue(it.endDay in 1..31)
-        }
-    }
-
-    @Test
     fun `summary paces session months per-day and quarantines break`() {
         val rows = listOf(
             tx(1000.0, TransactionType.EXPENSE, "Transport", ms(2026, 10, 1)),
@@ -127,18 +114,6 @@ class SessionWindowsTest {
         assertEquals(2000.0 / 11 * 30, session.monthlyPace, 0.01)
         assertEquals(9000.0, summary[Regime.BREAK]!!.expense, 0.001)
         assertTrue(summary[Regime.ATTACHMENT]!!.txCount == 0)
-    }
-
-    @Test
-    fun `semester start guess uses intake pattern`() {
-        // October: most recent September intake is this year's Sept 1.
-        assertEquals(ms(2026, 9, 1, 0), guessSemesterStart("Kenyatta University", ms(2027, 4, 30), ms(2026, 10, 15)))
-        // June: most recent September intake is last year's.
-        assertEquals(ms(2025, 9, 1, 0), guessSemesterStart("University of Nairobi", ms(2026, 4, 30), ms(2026, 6, 15)))
-        // Unknown school: 240 days before the stated end.
-        val end = ms(2027, 4, 30)
-        assertEquals(end - 240L * 24 * 60 * 60 * 1000, guessSemesterStart("", end, ms(2026, 10, 15)))
-        assertEquals(end - 240L * 24 * 60 * 60 * 1000, guessSemesterStart("Some New College", end, ms(2026, 10, 15)))
     }
 
     @Test

@@ -43,16 +43,21 @@ import java.util.Locale
 fun Next30DaysCard(
     transactions: List<Transaction>,
     bills: List<com.pesaflow.app.data.models.Bill>,
-    hide: Boolean = false
+    hide: Boolean = false,
+    // Dynamic horizon: nearest dated inflow (HELB day, allowance day) from
+    // the Income tab — the forecast counts down to money, not just month-end.
+    inflowDays: Int? = null
 ) {
-    val now = System.currentTimeMillis()
-    val projection = remember(transactions, bills, now) {
+    // now captured inside: keying remember on a fresh timestamp recomputed
+    // the whole 30-day projection on every recomposition (scroll jank).
+    val projection = remember(transactions, bills) {
+        val now = System.currentTimeMillis()
         projectCashFlow(
             balance = ledgerBalance(transactions),
             now = now,
             horizonDays = 30,
             paydays = predictPaydays(transactions, now),
-            bills = bills.filter { it.status != "PAID" },
+            bills = bills.filter { it.status != "PAID" && it.paidBy == "ME" },
             recurring = detectRecurring(transactions)
         )
     }
@@ -66,7 +71,8 @@ fun Next30DaysCard(
         Column(verticalArrangement = Arrangement.spacedBy(ppSpacing.sm)) {
             PpSectionHeader(
                 title = "Next 30 days 🔮",
-                subtitle = "Paydays + bills + subscriptions vs KSh ${if (hide) "••••" else ledgerBalance(transactions).toInt()} held"
+                subtitle = "Paydays + bills + subscriptions vs KSh ${if (hide) "••••" else ledgerBalance(transactions).toInt()} held" +
+                    (if (!hide && inflowDays != null) " · inflow in $inflowDays day${if (inflowDays == 1) "" else "s"} 📥" else "")
             )
             if (projection.brokeDate != null) {
                 Text(
@@ -81,27 +87,30 @@ fun Next30DaysCard(
                     color = ppColors.success
                 )
             }
-            // Mini projection bars on canvas, today → day 30, normalized to the
-            // peak. Red below the zero line, gold above.
-            val zeroY = if (projection.days.any { it.balance < 0 }) {
-                val minBal = projection.days.minOf { it.balance }
-                (maxBal / (maxBal - minBal)).toFloat() * 96f
-            } else 96f
+            // Mini projection bars on canvas, today → day 30. Red hangs BELOW
+            // the zero line, gold stands above it — the old code drew both
+            // upward (red streaks over gold) in raw px, which also shrank the
+            // bars on dense screens. Everything scales from size.height.
+            val hasNeg = projection.days.any { it.balance < 0 }
+            val minBal = if (hasNeg) projection.days.minOf { it.balance } else 0.0
+            val denom = (maxBal - minBal).coerceAtLeast(1.0)
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(96.dp)
                     .padding(vertical = ppSpacing.xs)
             ) {
+                val fullH = size.height
+                val zeroY = if (hasNeg) ((maxBal / denom) * fullH).toFloat() else fullH
                 val n = projection.days.size
                 val barW = size.width / (n * 1.5f)
                 projection.days.forEachIndexed { i, day ->
-                    val h = ((kotlin.math.abs(day.balance) / maxBal) * 96.0).toFloat()
+                    val h = ((kotlin.math.abs(day.balance) / denom) * fullH).toFloat()
                     val x = i * (size.width / n.toFloat()) + barW / 4f
                     val color = if (day.balance < 0) ppColors.error else ppColors.gold
                     drawRect(
                         color = color,
-                        topLeft = Offset(x, zeroY - h),
+                        topLeft = Offset(x, if (day.balance < 0) zeroY else zeroY - h),
                         size = Size(barW, h)
                     )
                 }

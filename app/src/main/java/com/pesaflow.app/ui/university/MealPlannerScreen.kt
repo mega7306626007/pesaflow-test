@@ -224,6 +224,8 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
     val campusSpots = remember(uniProfile?.universityName) {
         com.pesaflow.app.data.meals.spotsFor(uniProfile?.universityName ?: "")
     }
+    // Your reported spots feed the ranked card below (USER_REPORTED first).
+    val mySpots by viewModel.places.collectAsState()
 
     val foodBudget = budgets.firstOrNull { it.category == "Food" }?.limitAmount
     var monthlyFoodInput by remember { mutableStateOf(foodBudget?.toInt()?.toString() ?: viewModel.let { scannedMonthlyFoodOf(it.getOnboardingAnswers()) }?.toString() ?: "6000") }
@@ -723,6 +725,24 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
+                    Text(
+                        com.pesaflow.app.data.meals.mealTierLabel(
+                            com.pesaflow.app.data.meals.mealTier(dailyAllowance.toDouble())
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    // Onboarding context, read back: the grocery spot stated
+                    // at setup surfaces where food money is planned.
+                    val ctxFacts by viewModel.userContextFacts.collectAsState()
+                    ctxFacts["food.grocerySpot"]?.takeIf { it.isNotBlank() }?.let { spot ->
+                        Text(
+                            "Buying groceries at $spot 🛒",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = monthlyFoodInput,
@@ -789,24 +809,27 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     OutlinedTextField(value = foodPrice, onValueChange = { foodPrice = it }, label = { Text("Price (KSh)") }, modifier = Modifier.fillMaxWidth())
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("Meal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        MEAL_TYPES.forEach { t ->
-                            FilterChip(selected = foodType == t, onClick = { foodType = t }, label = { Text(t.take(5)) })
-                        }
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = MEAL_TYPES.map { com.pesaflow.app.ui.theme.SegOption(it, it) },
+                        selected = foodType,
+                        onSelect = { foodType = it }
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Part", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        COMPONENTS.forEach { c ->
-                            FilterChip(selected = foodComponent == c, onClick = { foodComponent = c }, label = { Text(c.take(5)) })
-                        }
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = COMPONENTS.map { com.pesaflow.app.ui.theme.SegOption(it, it) },
+                        selected = foodComponent,
+                        onSelect = { foodComponent = it }
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Cook", "Buy").forEach { s ->
-                            FilterChip(selected = foodSource == s, onClick = { foodSource = s }, label = { Text(s) })
-                        }
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("Cook", "Cook", "🍳"),
+                            com.pesaflow.app.ui.theme.SegOption("Buy", "Buy", "🍲")
+                        ),
+                        selected = foodSource,
+                        onSelect = { foodSource = it }
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         onClick = {
@@ -857,6 +880,116 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                                     else "Add ${campusSpots.first().university} campus pack 🍲 — ${missing.size} plates near you"
                                 )
                             }
+                        }
+                        // Ranked your-spots: user reports outrank the bundled
+                        // pack; over-budget plates excluded with a count.
+                        // Same rankFoodOptions the tests pin — one rule, both places.
+                        val myRanked = remember(mySpots, dailyAllowance) {
+                            com.pesaflow.app.data.places.rankFoodOptions(
+                                mySpots.filter { it.kind == "FOOD_OUTLET" },
+                                mealBudget = dailyAllowance
+                            )
+                        }
+                        val missingSpots = myRanked.first.filter { r ->
+                            mealItems.none { it.name.equals("${r.place.name} (${r.place.area})", ignoreCase = true) }
+                        }
+                        if (mySpots.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(modifier = Modifier.padding(20.dp)) {
+                                    Text("Your spots, ranked 🥇", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Your reports first — over-budget plates filtered out.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    if (missingSpots.isEmpty()) {
+                                        Text("All your spots are in My Foods ✓", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    missingSpots.take(4).forEach { r ->
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(r.place.name, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                                                Text(
+                                                    "KSh ${r.expectedCost.toInt()}" + if (r.place.area.isNotBlank()) " · ${r.place.area}" else "",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            val spotKey = "myspot:${r.place.id}"
+                                            TextButton(
+                                                onClick = {
+                                                    viewModel.addMealItem("${r.place.name} (${r.place.area})", "Lunch", r.expectedCost, "Complete", "Buy")
+                                                    ack(spotKey)
+                                                },
+                                                enabled = spotKey !in acked
+                                            ) { Text(if (spotKey in acked) "Added ✓" else "+ Food", color = MaterialTheme.colorScheme.primary) }
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                    }
+                                    if (myRanked.second > 0) {
+                                        Text(
+                                            "${myRanked.second} over your KSh ${dailyAllowance.toInt()} plate budget — skipped.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        // Your spots: plates you report beat the bundled pack
+                        // (USER_REPORTED ranks first). Stored locally; shared
+                        // only through the Online hub opt-in.
+                        val userPlaces by viewModel.places.collectAsState()
+                        var showSpotDialog by remember { mutableStateOf(false) }
+                        var spotName by remember { mutableStateOf("") }
+                        var spotPrice by remember { mutableStateOf("") }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedButton(
+                            onClick = { showSpotDialog = true },
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("＋ Suggest a spot — your plates beat our pack") }
+                        userPlaces.forEach { p ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${p.name} · KSh ${p.priceMin.toInt()} · your report ✅",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = { viewModel.deletePlace(p.id) }) { Text("×") }
+                            }
+                        }
+                        if (showSpotDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showSpotDialog = false },
+                                title = { Text("Suggest a spot") },
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedTextField(value = spotName, onValueChange = { spotName = it }, label = { Text("Spot + plate (e.g. Mama Njoroge chapati)") }, modifier = Modifier.fillMaxWidth())
+                                        OutlinedTextField(value = spotPrice, onValueChange = { spotPrice = it }, label = { Text("Price (KSh)") }, modifier = Modifier.fillMaxWidth())
+                                        Text("Shows as your report next to campus prices.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        spotPrice.toDoubleOrNull()?.takeIf { it > 0 }?.let { price ->
+                                            viewModel.addPlace(spotName, uniProfile?.universityName ?: "", price)
+                                            spotName = ""
+                                            spotPrice = ""
+                                            showSpotDialog = false
+                                        }
+                                    }) { Text("Save") }
+                                },
+                                dismissButton = { TextButton(onClick = { showSpotDialog = false }) { Text("Cancel") } }
+                            )
                         }
                     } else {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -976,35 +1109,41 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("1 · Which days?", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Any", "Mon", "Tue", "Wed", "Thu").forEach { d ->
-                            FilterChip(selected = newRuleDay == d, onClick = { newRuleDay = d }, label = { Text(d) })
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Fri", "Sat", "Sun").forEach { d ->
-                            FilterChip(selected = newRuleDay == d, onClick = { newRuleDay = d }, label = { Text(d) })
-                        }
-                        FilterChip(selected = newRuleDay == "Weekdays", onClick = { newRuleDay = "Weekdays" }, label = { Text("Wkday") })
-                        FilterChip(selected = newRuleDay == "Weekends", onClick = { newRuleDay = "Weekends" }, label = { Text("Wkend") })
-                    }
-                    Text("Wkday = Mon–Fri · Wkend = Sat–Sun", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("Any", "Any", "📅"),
+                            com.pesaflow.app.ui.theme.SegOption("Mon", "Mon"),
+                            com.pesaflow.app.ui.theme.SegOption("Tue", "Tue"),
+                            com.pesaflow.app.ui.theme.SegOption("Wed", "Wed"),
+                            com.pesaflow.app.ui.theme.SegOption("Thu", "Thu"),
+                            com.pesaflow.app.ui.theme.SegOption("Fri", "Fri"),
+                            com.pesaflow.app.ui.theme.SegOption("Sat", "Sat"),
+                            com.pesaflow.app.ui.theme.SegOption("Sun", "Sun"),
+                            com.pesaflow.app.ui.theme.SegOption("Weekdays", "Weekdays"),
+                            com.pesaflow.app.ui.theme.SegOption("Weekends", "Weekends")
+                        ),
+                        selected = newRuleDay,
+                        onSelect = { newRuleDay = it }
+                    )
+                    Text("Weekdays = Mon–Fri · Weekends = Sat–Sun", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("2 · What kind of rule?", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(selected = newRuleKind == "Must include", onClick = {
-                            newRuleKind = "Must include"
-                            newRuleValue = "Protein"
-                        }, label = { Text("Include") })
-                        FilterChip(selected = newRuleKind == "Only source", onClick = {
-                            newRuleKind = "Only source"
-                            newRuleValue = "Cook"
-                        }, label = { Text("Source") })
-                        FilterChip(selected = newRuleKind == "Max price", onClick = {
-                            newRuleKind = "Max price"
-                            newRuleValue = ""
-                        }, label = { Text("Max KSh") })
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("Must include", "Include", "➕"),
+                            com.pesaflow.app.ui.theme.SegOption("Only source", "Source", "🍳"),
+                            com.pesaflow.app.ui.theme.SegOption("Max price", "Max KSh", "💰")
+                        ),
+                        selected = newRuleKind,
+                        onSelect = {
+                            newRuleKind = it
+                            newRuleValue = when (it) {
+                                "Must include" -> "Protein"
+                                "Only source" -> "Cook"
+                                else -> ""
+                            }
+                        }
+                    )
                     Text(
                         "Include = plate must contain it · Source = cook/buy only · Max = price cap per plate",
                         style = MaterialTheme.typography.bodySmall,
@@ -1013,16 +1152,21 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("3 · Details", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                     when (newRuleKind) {
-                        "Must include" -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("Starch", "Mboga", "Protein").forEach { c ->
-                                FilterChip(selected = newRuleValue == c, onClick = { newRuleValue = c }, label = { Text(c) })
-                            }
-                        }
-                        "Only source" -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("Cook", "Buy").forEach { s ->
-                                FilterChip(selected = newRuleValue == s, onClick = { newRuleValue = s }, label = { Text(s) })
-                            }
-                        }
+                        "Must include" -> com.pesaflow.app.ui.theme.SegChoice(
+                            options = listOf("Starch", "Mboga", "Protein").map {
+                                com.pesaflow.app.ui.theme.SegOption(it, it)
+                            },
+                            selected = newRuleValue,
+                            onSelect = { newRuleValue = it }
+                        )
+                        "Only source" -> com.pesaflow.app.ui.theme.SegChoice(
+                            options = listOf(
+                                com.pesaflow.app.ui.theme.SegOption("Cook", "Cook", "🍳"),
+                                com.pesaflow.app.ui.theme.SegOption("Buy", "Buy", "🍲")
+                            ),
+                            selected = newRuleValue,
+                            onSelect = { newRuleValue = it }
+                        )
                         else -> OutlinedTextField(value = newRuleValue, onValueChange = { newRuleValue = it }, label = { Text("Max KSh per plate") }, modifier = Modifier.fillMaxWidth())
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1077,20 +1221,23 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(
-                            selected = persona == "Auto" || persona.isBlank(),
-                            onClick = {
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("Auto", "Auto", "✨"),
+                            com.pesaflow.app.ui.theme.SegOption("Transport", "Transport", "🚌"),
+                            com.pesaflow.app.ui.theme.SegOption("Hostel", "Hostel", "🏠"),
+                            com.pesaflow.app.ui.theme.SegOption("Tight", "Tight", "🫙"),
+                            com.pesaflow.app.ui.theme.SegOption("Full", "Full", "💼")
+                        ),
+                        selected = if (persona.isBlank()) "Auto" else persona,
+                        onSelect = { v ->
+                            if (v == "Auto") {
                                 persona = "Auto"
                                 mealPrefs.edit().putString("meal_persona", "Auto").apply()
                                 applyMealControls(effectiveMealPersona)
-                            },
-                            label = { Text("✨ Auto") }
-                        )
-                        listOf("Transport" to "🚌", "Hostel" to "🏠", "Tight" to "🫙", "Full" to "💼").forEach { (name, emoji) ->
-                            FilterChip(selected = persona == name, onClick = { applyPersona(name) }, label = { Text("$emoji $name") })
+                            } else applyPersona(v)
                         }
-                    }
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -1126,25 +1273,33 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Plates pair starch + mboga (+ protein when it fits). Items rotate so days differ.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Day", "Week", "Month", "Semester").forEach { p ->
-                            FilterChip(selected = selectedPeriod == p, onClick = { selectedPeriod = p }, label = { Text(p.take(4)) })
-                        }
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf("Day", "Week", "Month", "Semester").map {
+                            com.pesaflow.app.ui.theme.SegOption(it, it)
+                        },
+                        selected = selectedPeriod,
+                        onSelect = { selectedPeriod = it }
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Cook at home or buy ready?", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Any", "Cook", "Buy").forEach { s ->
-                            FilterChip(selected = sourceFilter == s, onClick = { sourceFilter = s }, label = { Text(s) })
-                        }
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("Any", "Any", "🍽️"),
+                            com.pesaflow.app.ui.theme.SegOption("Cook", "Cook", "🍳"),
+                            com.pesaflow.app.ui.theme.SegOption("Buy", "Buy", "🍲")
+                        ),
+                        selected = sourceFilter,
+                        onSelect = { sourceFilter = it }
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Max per plate?", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Any", "50", "100", "150", "200").forEach { m ->
-                            FilterChip(selected = maxPlate == m, onClick = { maxPlate = m }, label = { Text(if (m == "Any") "Any" else "≤$m") })
-                        }
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf("Any", "50", "100", "150", "200").map {
+                            com.pesaflow.app.ui.theme.SegOption(it, if (it == "Any") "Any" else "≤$it")
+                        },
+                        selected = maxPlate,
+                        onSelect = { maxPlate = it }
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Include?", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1153,14 +1308,14 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                         FilterChip(selected = includeSupper, onClick = { includeSupper = !includeSupper }, label = { Text("Supper") })
                     }
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Cooking for $people ${if (people == 1) "person" else "people"}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(1, 2, 3, 4).forEach { n ->
-                                FilterChip(selected = people == n, onClick = { people = n }, label = { Text("$n") })
-                            }
-                        }
-                    }
+                    Text("Cooking for $people ${if (people == 1) "person" else "people"}", style = MaterialTheme.typography.bodySmall)
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(1, 2, 3, 4).map {
+                            com.pesaflow.app.ui.theme.SegOption(it.toString(), "$it 👤")
+                        },
+                        selected = people.toString(),
+                        onSelect = { people = it.toInt() }
+                    )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Always add protein", style = MaterialTheme.typography.bodySmall)
@@ -1260,12 +1415,16 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                         val c = java.util.Calendar.getInstance()
                         c.getActualMaximum(java.util.Calendar.DAY_OF_MONTH) - c.get(java.util.Calendar.DAY_OF_MONTH) + 1
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(3 to "3d", 7 to "7d", 14 to "14d").forEach { (d, label) ->
-                            FilterChip(selected = survivalDays == d, onClick = { survivalDays = d; survivalPlan = null }, label = { Text(label) })
-                        }
-                        FilterChip(selected = survivalDays == monthEndDays, onClick = { survivalDays = monthEndDays; survivalPlan = null }, label = { Text("Month end") })
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("3", "3d"),
+                            com.pesaflow.app.ui.theme.SegOption("7", "7d"),
+                            com.pesaflow.app.ui.theme.SegOption("14", "14d"),
+                            com.pesaflow.app.ui.theme.SegOption(monthEndDays.toString(), "Month end", "📅")
+                        ),
+                        selected = survivalDays.toString(),
+                        onSelect = { survivalDays = it.toInt(); survivalPlan = null }
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
                     val endLabel = remember(survivalDays) {
                         val c = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_MONTH, survivalDays - 1) }
@@ -1900,12 +2059,17 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("Portions:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                listOf(0.25 to "¼", 0.5 to "½", 0.75 to "¾", 1.0 to "1×").forEach { (v, label) ->
-                                    FilterChip(selected = portionScale == v, onClick = { portionScale = v }, label = { Text(label) })
-                                }
-                            }
+                            Text("Portions:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            com.pesaflow.app.ui.theme.SegChoice(
+                                options = listOf(
+                                    com.pesaflow.app.ui.theme.SegOption("0.25", "¼"),
+                                    com.pesaflow.app.ui.theme.SegOption("0.5", "½"),
+                                    com.pesaflow.app.ui.theme.SegOption("0.75", "¾"),
+                                    com.pesaflow.app.ui.theme.SegOption("1.0", "1×")
+                                ),
+                                selected = portionScale.toString(),
+                                onSelect = { portionScale = it.toDouble() }
+                            )
                             Text(
                                 "Quarters stretch unga, mchele, cabbage across lunch + supper — estimate scales with portions.",
                                 style = MaterialTheme.typography.bodySmall,

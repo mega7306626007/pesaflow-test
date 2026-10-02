@@ -14,10 +14,13 @@ data class SplurgeReport(
 private const val DAY_MS = 24L * 60 * 60 * 1000
 
 fun paydaySplurge(rows: List<LedgerRow>, minPaydays: Int = 2): SplurgeReport? {
-    val incomes = rows.filter { it.type == TransactionType.INCOME && it.amount > 0 }
+    // Demo rows and onboarding equity are not paydays: pocket + upkeep seeded
+    // together used to fake a 2-payday splurge in every onboarding month.
+    val live = rows.filter { !it.isSample && !it.isOpening }
+    val incomes = live.filter { it.type == TransactionType.INCOME && it.amount > 0 }
         .sortedBy { it.ts }
     if (incomes.size < minPaydays) return null
-    val expenses = rows.filter { it.type == TransactionType.EXPENSE && it.amount > 0 }
+    val expenses = live.filter { it.type == TransactionType.EXPENSE && it.amount > 0 }
     // One payday's shadow ends where the next begins — spending belongs to
     // the most recent income, never double-counted across paydays.
     val pct3 = mutableListOf<Double>()

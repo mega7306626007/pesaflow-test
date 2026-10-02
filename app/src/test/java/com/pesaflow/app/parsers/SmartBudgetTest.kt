@@ -1,8 +1,10 @@
 package com.pesaflow.app.parsers
 
 import com.pesaflow.app.data.models.BudgetType
+import com.pesaflow.app.data.models.Bill
 import com.pesaflow.app.ui.budgets.BudgetRule
 import com.pesaflow.app.ui.budgets.Persona
+import com.pesaflow.app.ui.budgets.monthlyBillReserve
 import com.pesaflow.app.ui.budgets.smartBudget
 import org.junit.Assert.*
 import org.junit.Test
@@ -67,5 +69,31 @@ class SmartBudgetTest {
         assertTrue(result.tightMode)
         val transport = result.suggestions.first { it.category == "Transport" }
         assertTrue(transport.amount >= 6500)
+    }
+
+    @Test
+    fun `one time bill is paced to its due date and outstanding remainder`() {
+        val now = System.currentTimeMillis()
+        val fee = Bill(
+            name = "Semester fees",
+            amount = 32000.0,
+            amountRemaining = 16000.0,
+            dueDate = now + 90L * 24 * 60 * 60 * 1000,
+            category = "School"
+        )
+        assertEquals(5334, monthlyBillReserve(fee, now))
+    }
+
+    @Test
+    fun `overdue one time bill reserves no more than its remainder`() {
+        val now = System.currentTimeMillis()
+        val fee = Bill(
+            name = "Semester fees",
+            amount = 32000.0,
+            amountRemaining = 16000.0,
+            dueDate = now - 2L * 24 * 60 * 60 * 1000,
+            category = "School"
+        )
+        assertEquals(16000, monthlyBillReserve(fee, now))
     }
 }

@@ -4,6 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -42,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.text.input.ImeAction
@@ -231,11 +234,18 @@ fun QuickAddDialog(
         }
     }
 
+    // Pill taps dismiss the keyboard: typing a merchant then tapping a
+    // category left the keyboard shoving the whole dialog upward.
+    val keyboard = LocalSoftwareKeyboardController.current
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (existing == null) "Add transaction" else "Edit transaction", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(PesaSpacing.sm)) {
+            // Scrollable: small screens + open keyboard no longer bury Save.
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(PesaSpacing.sm)
+            ) {
                 // Smart line: one line in, whole form filled. Enter applies
                 // directly — the suggestion tap is the same fill, not a step.
                 if (existing == null) {
@@ -255,38 +265,22 @@ fun QuickAddDialog(
                     }
                 }
                 // Spent / Received / Saved — smart defaults follow the mode.
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(PesaSpacing.xs)) {
-                    FilterChip(
-                        selected = entryMode == "Spent",
-                        onClick = {
-                            entryMode = "Spent"
-                            categoryTouched = true
-                            if (selectedCategory == "Salary" || selectedCategory == "Savings") selectedCategory = "Food"
-                        },
-                        label = { Text("− Spent") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    FilterChip(
-                        selected = entryMode == "Received",
-                        onClick = {
-                            entryMode = "Received"
-                            categoryTouched = true
-                            if (selectedCategory == "Food" || selectedCategory == "Savings") selectedCategory = "Salary"
-                        },
-                        label = { Text("+ Received") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    FilterChip(
-                        selected = entryMode == "Saved",
-                        onClick = {
-                            entryMode = "Saved"
-                            categoryTouched = true
-                            if (selectedCategory == "Food" || selectedCategory == "Salary") selectedCategory = "Savings"
-                        },
-                        label = { Text("◉ Saved") },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                com.pesaflow.app.ui.theme.SegChoice(
+                    options = listOf(
+                        com.pesaflow.app.ui.theme.SegOption("Spent", "− Spent"),
+                        com.pesaflow.app.ui.theme.SegOption("Received", "+ Received"),
+                        com.pesaflow.app.ui.theme.SegOption("Saved", "◉ Saved")
+                    ),
+                    selected = entryMode,
+                    onSelect = { v ->
+                        keyboard?.hide()
+                        entryMode = v
+                        categoryTouched = true
+                        if (v == "Spent" && (selectedCategory == "Salary" || selectedCategory == "Savings")) selectedCategory = "Food"
+                        if (v == "Received" && (selectedCategory == "Food" || selectedCategory == "Savings")) selectedCategory = "Salary"
+                        if (v == "Saved" && (selectedCategory == "Food" || selectedCategory == "Salary")) selectedCategory = "Savings"
+                    }
+                )
                 // One-tap repeat: same as last time, editable before saving.
                 repeatCandidate?.let { last ->
                     TextButton(onClick = {
@@ -474,7 +468,7 @@ fun QuickAddDialog(
                 Text(if (entryMode == "Received") "Source" else "Category", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(PesaSpacing.xs), verticalArrangement = Arrangement.spacedBy(PesaSpacing.xs)) {
                     (if (entryMode == "Received") QuickIncomeSources else QuickCategories).forEach { c ->
-                        FilterChip(selected = selectedCategory == c, onClick = { selectedCategory = c; categoryTouched = true }, label = { Text(c) })
+                        FilterChip(selected = selectedCategory == c, onClick = { keyboard?.hide(); selectedCategory = c; categoryTouched = true }, label = { Text(c) })
                     }
                 }
                 val suggestedCat = remember(inputMerchant, entryMode) { suggestFor(inputMerchant, entryType) }
@@ -486,25 +480,19 @@ fun QuickAddDialog(
                     }
                 }
                 Text("Payment method", style = MaterialTheme.typography.labelLarge)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(PesaSpacing.xs)) {
-                    listOf(PaymentMethod.MPESA, PaymentMethod.CASH, PaymentMethod.BANK_TRANSFER, PaymentMethod.AIRTIME).forEach { m ->
-                        FilterChip(
-                            selected = selectedMethod == m,
-                            onClick = { selectedMethod = m },
-                            label = {
-                                Text(
-                                    when (m) {
-                                        PaymentMethod.MPESA -> "M-Pesa"
-                                        PaymentMethod.CASH -> "Cash"
-                                        PaymentMethod.BANK_TRANSFER -> "Bank"
-                                        PaymentMethod.AIRTIME -> "Airtime"
-                                        PaymentMethod.OTHER -> "Other"
-                                    }
-                                )
-                            }
-                        )
+                com.pesaflow.app.ui.theme.SegChoice(
+                    options = listOf(
+                        com.pesaflow.app.ui.theme.SegOption("MPESA", "M-Pesa", "📲"),
+                        com.pesaflow.app.ui.theme.SegOption("CASH", "Cash", "💵"),
+                        com.pesaflow.app.ui.theme.SegOption("BANK_TRANSFER", "Bank", "🏦"),
+                        com.pesaflow.app.ui.theme.SegOption("AIRTIME", "Airtime", "📶")
+                    ),
+                    selected = selectedMethod.name,
+                    onSelect = {
+                        keyboard?.hide()
+                        selectedMethod = runCatching { PaymentMethod.valueOf(it) }.getOrDefault(selectedMethod)
                     }
-                }
+                )
                 if (existing == null) {
                     OutlinedTextField(
                         value = inputNotes,

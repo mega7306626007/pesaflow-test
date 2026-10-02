@@ -45,7 +45,6 @@ import com.pesaflow.app.data.parsers.SenderCard
 import com.pesaflow.app.data.parsers.groupSenderCards
 import com.pesaflow.app.data.parsers.SmsScanResult
 import com.pesaflow.app.data.parsers.buildDraft
-import com.pesaflow.app.data.parsers.guessSemesterStart
 import com.pesaflow.app.data.parsers.monthKey
 import com.pesaflow.app.data.parsers.LedgerRow
 import com.pesaflow.app.data.parsers.deduceFare
@@ -70,19 +69,32 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
     // Celebration beats the handoff: seeded → check + stars → home.
     var celebrate by rememberSaveable { mutableStateOf(false) }
     var welcomed by rememberSaveable { mutableStateOf(bootPrefs.getBoolean("onboarding_welcomed", false)) }
+    var showDemoConfirmation by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(step, welcomed) {
         bootPrefs.edit().putInt("onboarding_step", step).putBoolean("onboarding_welcomed", welcomed).apply()
     }
 
+    fun loadDemoData() {
+        showDemoConfirmation = false
+        bootPrefs.edit().putBoolean("demo_mode", true).apply()
+        viewModel.seedSampleData()
+        onDone()
+    }
+
     // Grand opening gate: first impression, instructions, then the 4 steps.
     if (!welcomed) {
-        GrandOpening(
-            onBegin = { welcomed = true },
-            onSkip = {
-                viewModel.seedSampleData()
-                onDone()
+        Box(Modifier.fillMaxSize()) {
+            GrandOpening(
+                onBegin = { welcomed = true },
+                onSkip = { showDemoConfirmation = true }
+            )
+            if (showDemoConfirmation) {
+                DemoDataConfirmationDialog(
+                    onDismiss = { showDemoConfirmation = false },
+                    onConfirm = ::loadDemoData
+                )
             }
-        )
+        }
         return
     }
 
@@ -90,6 +102,9 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
     var name by rememberSaveable { mutableStateOf("") }
     var nickname by rememberSaveable { mutableStateOf("") }
     var university by rememberSaveable { mutableStateOf("") }
+    var campus by rememberSaveable { mutableStateOf("") }
+    var programme by rememberSaveable { mutableStateOf("") }
+    var yearOfStudy by rememberSaveable { mutableStateOf("") }
     var semester by rememberSaveable { mutableStateOf("1") }
 
     // Step 2: funding
@@ -101,9 +116,15 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
     var monthlyBudget by rememberSaveable { mutableStateOf("") }
     var foodBudget by rememberSaveable { mutableStateOf("") }
     var feesAmount by rememberSaveable { mutableStateOf("") }
-    var endMillis by rememberSaveable { mutableStateOf(System.currentTimeMillis() + 120 * DAY_MS) }
-    var showPicker by rememberSaveable { mutableStateOf(false) }
-    val pickerState = rememberDatePickerState(initialSelectedDateMillis = endMillis)
+    var semesterStartMillis by rememberSaveable { mutableStateOf(0L) }
+    var endMillis by rememberSaveable { mutableStateOf(0L) }
+    var feesDueMillis by rememberSaveable { mutableStateOf(0L) }
+    var showStartPicker by rememberSaveable { mutableStateOf(false) }
+    var showEndPicker by rememberSaveable { mutableStateOf(false) }
+    var showFeesDuePicker by rememberSaveable { mutableStateOf(false) }
+    val startPickerState = rememberDatePickerState()
+    val endPickerState = rememberDatePickerState()
+    val feesDuePickerState = rememberDatePickerState()
 
     // Step 3 (new): tell us about you — 5 quick questions that seed
     // budgets, goals and first-run advice. All optional, all skippable.
@@ -118,15 +139,27 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
     // Six real setups — rent is not universal, cooking moves Food most.
     var homeKind by rememberSaveable { mutableStateOf("Hostel") }
     var commuteLen by rememberSaveable { mutableStateOf("Near") }
+    var walkOk by rememberSaveable { mutableStateOf("Yes") }
     var cooksFood by rememberSaveable { mutableStateOf("Yes") }
+    val commuteForPlanning = if (commuteLen == "Walk" && walkOk == "No") "Near" else commuteLen
+    // Optional context facts (Layer C): stored with provenance, editable,
+    // never treated as confirmed truth by inference.
+    var grocerySpot by rememberSaveable { mutableStateOf("") }
+    var stages by rememberSaveable { mutableStateOf("") }
     // First/last lecture hour (commuters): asked on step 0, saved at finish.
     var firstClassH by rememberSaveable { mutableStateOf("") }
     var lastClassH by rememberSaveable { mutableStateOf("") }
     // Single source of truth: every conditional box below reads this set.
     // The form can never drift from the branch rules.
-    val visible = remember(homeKind, commuteLen, fundSource) {
+    val visible = remember(homeKind, commuteLen, walkOk, cooksFood, fundSource) {
         visibleBranches(
-            mapOf("home" to homeKind, "commute" to commuteLen, "fundSource" to fundSource)
+            mapOf(
+                "home" to homeKind,
+                "commute" to commuteLen,
+                "walkOk" to walkOk,
+                "cooks" to cooksFood,
+                "fundSource" to fundSource
+            )
         ).toSet()
     }
 
@@ -176,10 +209,9 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
             TopAppBar(
                 title = { Text("Karibu PesaPlanner 👋", fontWeight = FontWeight.Bold) },
                 actions = {
-                    TextButton(onClick = {
-                        viewModel.seedSampleData()
-                        onDone()
-                    }) { Text("Skip → sample data") }
+                    TextButton(onClick = { showDemoConfirmation = true }) {
+                        Text("Explore sample data")
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
@@ -231,17 +263,15 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     Text("→ full name is only used when it is serious (warnings); daily talk uses the nickname.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("University", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        UNI_CHIPS.take(3).forEach { u ->
-                            FilterChip(selected = university == u, onClick = { university = u }, label = { Text(u) })
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        UNI_CHIPS.drop(3).forEach { u ->
-                            FilterChip(selected = university == u, onClick = { university = u }, label = { Text(u) })
-                        }
-                    }
-                    OutlinedTextField(value = university, onValueChange = { university = it }, label = { Text("University / campus (e.g. UoN Main)") }, modifier = Modifier.fillMaxWidth())
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = UNI_CHIPS.map { com.pesaflow.app.ui.theme.SegOption(it, it, "🎓") },
+                        selected = university,
+                        onSelect = { university = it }
+                    )
+                    OutlinedTextField(value = university, onValueChange = { university = it }, label = { Text("University or college") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = campus, onValueChange = { campus = it }, label = { Text("Campus (optional, e.g. Main Campus)") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = programme, onValueChange = { programme = it }, label = { Text("Programme or course (optional)") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = yearOfStudy, onValueChange = { yearOfStudy = it }, label = { Text("Year of study (optional, e.g. Year 2)") }, modifier = Modifier.fillMaxWidth())
                     // Campus food map (main format, our data): where to eat,
                     // what plate, what price — planner-ready below.
                     if (university.isNotBlank()) {
@@ -280,39 +310,51 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     // Living + costs live here (step 0): where you stay routes
                     // every cost box below through the branch engine.
                     Text("Where do you stay? 🏠", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Parents", "Hostel", "Shared", "Alone").forEach { h ->
-                            FilterChip(
-                                selected = homeKind == h,
-                                onClick = { homeKind = h },
-                                label = { Text(h) }
-                            )
-                        }
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("Parents", "Parents", "🏡"),
+                            com.pesaflow.app.ui.theme.SegOption("Hostel", "Hostel", "🏠"),
+                            com.pesaflow.app.ui.theme.SegOption("Shared", "Shared", "🤝"),
+                            com.pesaflow.app.ui.theme.SegOption("Alone", "Alone", "🧍")
+                        ),
+                        selected = homeKind,
+                        onSelect = { homeKind = it }
+                    )
                     Text("Daily trip to campus?", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Walk", "Near", "Far").forEach { c ->
-                            FilterChip(
-                                selected = commuteLen == c,
-                                onClick = { commuteLen = c },
-                                label = { Text(if (c == "Far") "Far daily" else if (c == "Near") "Near hop" else "Walk") }
-                            )
-                        }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("Walk", "Walk", "🚶"),
+                            com.pesaflow.app.ui.theme.SegOption("Near", "Near hop", "🛵"),
+                            com.pesaflow.app.ui.theme.SegOption("Far", "Far daily", "🚌")
+                        ),
+                        selected = commuteLen,
+                        onSelect = { commuteLen = it }
+                    )
+                    if ("walkOk" in visible) {
+                        Text("Is walking practical on most class days?", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        com.pesaflow.app.ui.theme.SegChoice(
+                            options = listOf(
+                                com.pesaflow.app.ui.theme.SegOption("Yes", "Yes, I walk", "🚶"),
+                                com.pesaflow.app.ui.theme.SegOption("No", "No, I sometimes pay fares", "🚌")
+                            ),
+                            selected = walkOk,
+                            onSelect = { walkOk = it }
+                        )
                     }
                     Text("Do you cook?", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Yes", "No").forEach { k ->
-                            FilterChip(
-                                selected = cooksFood == k,
-                                onClick = { cooksFood = k },
-                                label = { Text(if (k == "Yes") "I cook" else "I buy") }
-                            )
-                        }
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("Yes", "I cook", "🍳"),
+                            com.pesaflow.app.ui.theme.SegOption("No", "I buy", "🍲")
+                        ),
+                        selected = cooksFood,
+                        onSelect = { cooksFood = it }
+                    )
                     Text(
                         if (homeKind == "Parents") "Home roof — no rent box, budgets swap Rent for a small Home upkeep envelope."
                         else if (cooksFood == "No") "Bought meals cost most — Food gets protected first."
-                        else if (commuteLen == "Far") "Long matatu daily — Transport becomes non-negotiable."
+                        else if (commuteForPlanning == "Far") "Long matatu daily — Transport becomes non-negotiable."
+                        else if (commuteLen == "Walk" && walkOk == "No") "Walking is not practical every class day — add the fare you usually pay."
                         else "Light setup — more room for Savings.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -327,6 +369,28 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     if ("fare" in visible) {
                         OutlinedTextField(value = transportDaily, onValueChange = { transportDaily = it }, label = { Text("Transport per day, to and back? (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                         Text("→ Transport budget (×30) + commuter weight in the calculator.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if ("grocery" in visible) {
+                        Text("Where do you usually shop? 🛒", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = grocerySpot,
+                            onValueChange = { grocerySpot = it },
+                            label = { Text("Grocery spot (e.g. Naivas, market)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text("→ local food advice uses this spot.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if ("stages" in visible) {
+                        Text("Common stages/routes? 🚏", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = stages,
+                            onValueChange = { stages = it },
+                            label = { Text("Stages (e.g. Roysambu, CBD)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text("→ transport estimates anchor to real routes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if ("classTimes" in visible) {
                         Text("School run 🚌 — first class in, last class out?", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
@@ -355,7 +419,7 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     StepArt(R.drawable.ob_tellus)
                     Text("Tell us about you 📝", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "5 quick guesses — they pre-fill your budgets and goals. Skip anything, estimates are perfect.",
+                        "5 quick estimates — they pre-fill your budgets and goals. Skip anything; these are starting points you can edit anytime.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -373,15 +437,15 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     StepArt(R.drawable.ob_money)
                     Text("Pesa ya semester 💰", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text("HELB comes in tranches — enter what you expect, plus cash in pocket today.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("HELB", "SELF", "BOTH").forEach { s ->
-                            FilterChip(
-                                selected = fundSource == s,
-                                onClick = { fundSource = s },
-                                label = { Text(if (s == "SELF") "Self-sponsored" else s) }
-                            )
-                        }
-                    }
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("HELB", "HELB", "🎓"),
+                            com.pesaflow.app.ui.theme.SegOption("SELF", "Self-sponsored", "💪"),
+                            com.pesaflow.app.ui.theme.SegOption("BOTH", "Both", "🤝")
+                        ),
+                        selected = fundSource,
+                        onSelect = { fundSource = it }
+                    )
                     if ("helb" in visible) {
                         OutlinedTextField(value = helbSem, onValueChange = { helbSem = it }, label = { Text("HELB per semester (KSh, optional)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                         Text("Splits into monthly upkeep automatically — carried forward each term, no re-typing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -391,16 +455,34 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     OutlinedTextField(value = pocket, onValueChange = { pocket = it }, label = { Text("Pocket cash in hand (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                     Text("→ opening cash in your ledger — net worth, balance and planners all move.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(value = feesAmount, onValueChange = { feesAmount = it }, label = { Text("Fees owed (KSh, optional)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                    Text("→ fees bill + countdown. Part of HELB can cover it — we show the leftover.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("→ fees reserve. Part of HELB can cover it — we show the uncovered amount.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick = { showFeesDuePicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Fees due date: " + if (feesDueMillis > 0L) {
+                                java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
+                                    .format(java.util.Date(feesDueMillis))
+                            } else "Not set"
+                        )
+                    }
                     OutlinedTextField(value = monthlyBudget, onValueChange = { monthlyBudget = it }, label = { Text("Monthly budget (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                     Text("→ your master budget — pace, alerts and safe-to-spend all read it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(value = foodBudget, onValueChange = { foodBudget = it }, label = { Text("Food budget (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                     Text("→ Food budget + the meal planner's spending figure.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(
-                        onClick = { showPicker = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Text("Semester ends: ${java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date(endMillis))}")
+                    OutlinedButton(onClick = { showStartPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Semester starts: " + if (semesterStartMillis > 0L) {
+                                java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
+                                    .format(java.util.Date(semesterStartMillis))
+                            } else "Not set"
+                        )
+                    }
+                    OutlinedButton(onClick = { showEndPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Semester ends: " + if (endMillis > 0L) {
+                                java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
+                                    .format(java.util.Date(endMillis))
+                            } else "Not set"
+                        )
                     }
                 }
                 // Income setup used to interrogate here — dropped. Income arrives
@@ -410,7 +492,7 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     StepArt(R.drawable.ob_sms)
                     Text("Track spending automatically ⚡", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "Allow SMS access and M-Pesa texts become pending transactions for you to confirm. Nothing enters your books unverified.",
+                        "If you allow SMS access, PesaFlow matches recent messages on this device. Most transactions wait for your review; trusted matches may be filed automatically.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -421,7 +503,7 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("First-run check: full year", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Text(
-                        "Reads your M-Pesa texts into pending approvals and uses the totals as editable starting figures. Nothing enters your books unverified.",
+                        "Scans recent inbox messages on this device for transaction details. Parsed totals are editable starting estimates; most detected rows wait for review, while trusted matches may be filed automatically.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -437,9 +519,22 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                                     fareProposal = null
                                     fareDismissed = false
                                     val r = withContext(Dispatchers.IO) {
-                                        // First scan is everything: full year, high cap.
+                                        // The label promises five months: use that
+                                        // exact calendar cutoff, not a year-long scan.
+                                        val scanNow = System.currentTimeMillis()
+                                        val scanSince = java.util.Calendar.getInstance().apply {
+                                            timeInMillis = scanNow
+                                            add(java.util.Calendar.MONTH, -5)
+                                        }.timeInMillis
+                                        val scanDays = ((scanNow - scanSince + DAY_MS - 1) / DAY_MS).toInt()
                                         // The session filter (at finish) quarantines break.
-                                        scanRecentSms(appContext, 365, 5000, onProgress = { f, _ -> scanProgress = f })
+                                        scanRecentSms(
+                                            appContext,
+                                            scanDays,
+                                            5000,
+                                            onProgress = { f, _ -> scanProgress = f },
+                                            sinceTimestamp = scanSince
+                                        )
                                     }
                                     var queued = 0
                                     r.parsed.forEach { if (viewModel.tryQueuePending(it)) queued++ }
@@ -464,7 +559,7 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                                     // morning amount ± band across class mornings
                                     // reads as the daily fare: confirm once and
                                     // the Transport box fills itself.
-                                    fareProposal = if (homeKind == "Hostel" && commuteLen == "Walk") null
+                                    fareProposal = if (homeKind == "Hostel" && commuteForPlanning == "Walk") null
                                     else deduceFare(
                                         r.parsed.map { LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp) }
                                     ) { ts ->
@@ -647,6 +742,12 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                             ReviewRow("Monthly upkeep → ledger", revUpkeep?.let { "KSh " + it.toInt() } ?: "—", if (revUpkeep != null) "you" else "skip")
                             ReviewRow("Savings goal", revSave?.let { "KSh " + it.toInt() } ?: "—", if (revSave != null) "you" else "skip")
                             ReviewRow("Fees bill", revFees?.let { "KSh " + it.toInt() } ?: "—", if (revFees != null) "you" else "skip")
+                            ReviewRow(
+                                "Fees due",
+                                if (feesDueMillis > 0L) java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
+                                    .format(java.util.Date(feesDueMillis)) else "—",
+                                if (feesDueMillis > 0L) "you entered" else "not set"
+                            )
                             val revSources = viewModel.incomeSources.value
                             ReviewRow(
                                 "Income sources",
@@ -655,7 +756,7 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                             )
                             ReviewRow("Reports", "Night · Sunday · Daily", "auto-armed")
                             val revPersona = com.pesaflow.app.ui.budgets.parsePersona(
-                                "home=" + when (homeKind) { "Parents" -> "PARENTS"; "Hostel" -> "HOSTEL"; else -> "RENTAL" } + "|commute=" + commuteLen.uppercase() + "|cooking=" + if (cooksFood == "Yes") "YES" else "NO"
+                                "home=" + when (homeKind) { "Parents" -> "PARENTS"; "Hostel" -> "HOSTEL"; else -> "RENTAL" } + "|commute=" + commuteForPlanning.uppercase() + "|cooking=" + if (cooksFood == "Yes") "YES" else "NO"
                             )
                             val effPersona = personaOverride.takeIf { it.isNotBlank() }?.let {
                                 com.pesaflow.app.ui.budgets.Persona.valueOf(it)
@@ -710,7 +811,13 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                 AlertDialog(
                     onDismissRequest = { showSmsRationale = false },
                     title = { Text("Why SMS access?", fontWeight = FontWeight.Bold) },
-                    text = { Text("Your M-Pesa texts become pending rows you confirm — that is the whole auto-tracking magic. No access, no magic. You can still log everything by hand.") },
+                    text = {
+                        Text(
+                            "PesaFlow scans recent inbox messages on this device to find transaction details and stores the parsed records locally. " +
+                                "Most detected transactions wait for your review; trusted matches may be filed automatically. " +
+                                "SMS access is optional — you can deny it and enter transactions yourself."
+                        )
+                    },
                     confirmButton = { TextButton(onClick = { showSmsRationale = false; smsPerm.launchPermissionRequest() }) { Text("Allow SMS") } },
                     dismissButton = { TextButton(onClick = { showSmsRationale = false }) { Text("Not now") } }
                 )
@@ -738,7 +845,9 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                 TextButton(onClick = { if (step > 0) step-- }, enabled = step > 0) { Text("Back") }
                 Button(
                     onClick = {
-                        if (step < 4) {
+                        if (step == 4 && semesterStartMillis > 0L && endMillis > 0L && endMillis <= semesterStartMillis) {
+                            android.widget.Toast.makeText(appContext, "Semester end must be after its start.", android.widget.Toast.LENGTH_LONG).show()
+                        } else if (step < 4) {
                             step++
                         } else {
                             val now = System.currentTimeMillis()
@@ -747,16 +856,18 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                             viewModel.saveUniversityProfile(
                                 UniversityProfile(
                                     universityName = university.trim(),
-                                    campus = "",
+                                    campus = campus.trim(),
+                                    programme = programme.trim(),
+                                    yearOfStudy = yearOfStudy.trim(),
                                     currentSemester = semester.toIntOrNull() ?: 1,
                                     academicYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString(),
-                                    semesterStartTimestamp = now,
+                                    semesterStartTimestamp = semesterStartMillis,
                                     semesterEndTimestamp = endMillis,
                                     startingFunding = pocket.toDoubleOrNull() ?: 0.0,
                                     helbExpected = if (fundSource == "SELF") 0.0 else helbSem.toDoubleOrNull() ?: 0.0,
                                     fundingSource = fundSource,
                                     feesAmount = feesAmount.toDoubleOrNull() ?: 0.0,
-                                    feesDueDate = endMillis
+                                    feesDueDate = feesDueMillis
                                 )
                             )
                             // Smart seeding: HELB tranches + sponsor answers become Income
@@ -790,9 +901,9 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                                         else -> "RENTAL"
                                     },
                                     commute = when {
-                                        commuteLen.contains("far", ignoreCase = true) -> "LONG"
-                                        commuteLen.contains("walk", ignoreCase = true) -> "WALK"
-                                        commuteLen.contains("near", ignoreCase = true) || commuteLen.contains("short", ignoreCase = true) -> "SHORT"
+                                        commuteForPlanning.contains("far", ignoreCase = true) -> "LONG"
+                                        commuteForPlanning.contains("walk", ignoreCase = true) -> "WALK"
+                                        commuteForPlanning.contains("near", ignoreCase = true) || commuteForPlanning.contains("short", ignoreCase = true) -> "SHORT"
                                         else -> "SHORT"
                                     },
                                     food = when (cooksFood) {
@@ -831,20 +942,38 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                             saveTarget.toDoubleOrNull()?.takeIf { it > 0 }?.let {
                                 viewModel.addSavingsGoal("Monthly savings", it, 30)
                             }
+                            // Context facts (Layer C): explicit, provenance-stamped,
+                            // user-editable. Inference may read but never overwrite them.
+                            viewModel.setContextFact(com.pesaflow.app.data.context.ContextFact(key = "housing.current", value = homeKind, source = com.pesaflow.app.data.context.ContextSources.USER_SELECTED))
+                            viewModel.setContextFact(com.pesaflow.app.data.context.ContextFact(key = "transport.primaryMode", value = commuteForPlanning, source = com.pesaflow.app.data.context.ContextSources.USER_SELECTED))
+                            if (grocerySpot.isNotBlank()) {
+                                viewModel.setContextFact(com.pesaflow.app.data.context.ContextFact(key = "food.grocerySpot", value = grocerySpot.trim(), source = com.pesaflow.app.data.context.ContextSources.USER_ENTERED))
+                            }
+                            if (stages.isNotBlank()) {
+                                viewModel.setContextFact(com.pesaflow.app.data.context.ContextFact(key = "transport.homeToCampus", value = stages.trim(), source = com.pesaflow.app.data.context.ContextSources.USER_ENTERED))
+                            }
                             // Session-aware rhythm upgrade: scan-backfilled (or blank)
                             // Transport/Rent are re-derived from fare/anchor rhythms
                             // trained on in-session months only — break months never
                             // train anything. User-typed values are sacred.
-                            val semGuess = guessSemesterStart(university, endMillis, now)
-                            val semCal = resolveCalendar(semGuess, endMillis, now, firstYear = (semester.toIntOrNull() ?: 1) <= 1)
+                            val semCal = resolveCalendar(
+                                semesterStartMillis,
+                                endMillis,
+                                now,
+                                firstYear = (semester.toIntOrNull() ?: 1) <= 1
+                            )
                             // User-confirmed dead months (break dialog) leave the
                             // averages even when they fall inside stated spans.
                             val breakOverrides = appContext.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
                                 .getStringSet("confirmed_break_months", emptySet()) ?: emptySet()
                             val draft = scanResult?.let { scan ->
-                                buildDraft(
+                                val periodRows = if (semesterStartMillis > 0L && endMillis > semesterStartMillis) {
+                                    scan.parsed.filter { semCal.regimeOf(it.dateTimestamp) == Regime.SESSION }
+                                } else {
                                     scan.parsed
-                                        .filter { semCal.regimeOf(it.dateTimestamp) == Regime.SESSION }
+                                }
+                                buildDraft(
+                                    periodRows
                                         .filter { monthKey(it.dateTimestamp) !in breakOverrides }
                                         .map { LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp) },
                                     isClassDay = { ts ->
@@ -888,8 +1017,10 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                             ReminderScheduler.scheduleDaily(appContext)
                             ReminderScheduler.scheduleLunchScan(appContext)
                             val feesAmt = feesAmount.toDoubleOrNull()?.takeIf { it > 0 }
-                            if (feesAmt != null && viewModel.bills.value.none { it.name == "Semester fees" && it.status != "PAID" }) {
-                                viewModel.addBill("Semester fees", feesAmt, endMillis, "School", "ONE_TIME")
+                            if (feesAmt != null && feesDueMillis > 0L &&
+                                viewModel.bills.value.none { it.name == "Semester fees" && it.status != "PAID" }
+                            ) {
+                                viewModel.addBill("Semester fees", feesAmt, feesDueMillis, "School", "ONE_TIME")
                             }
                             // School run from step 0: class hours ride Mon–Fri into
                             // the timetable — commute days + peak verdict follow.
@@ -930,12 +1061,12 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                                 // write-only and was cut.
                                 "rent=$rentGuess|transport=$transportDaily" +
                                     "|airtime=$airtimeWeekly" +
-                                    "|living=" + if (commuteLen == "Far" && homeKind != "Parents") "COMMUTER" else "HOSTEL" +
+                                    "|living=" + if (commuteForPlanning == "Far" && homeKind != "Parents") "COMMUTER" else "HOSTEL" +
                                     "|home=" + homeCode +
-                                    "|commute=" + commuteLen.uppercase() +
+                                    "|commute=" + commuteForPlanning.uppercase() +
                                     "|cooking=" + if (cooksFood == "Yes") "YES" else "NO" +
                                     "|persona=" + (personaOverride.takeIf { it.isNotBlank() } ?: com.pesaflow.app.ui.budgets.parsePersona(
-                                        "home=" + homeCode + "|commute=" + commuteLen.uppercase() + "|cooking=" + if (cooksFood == "Yes") "YES" else "NO"
+                                        "home=" + homeCode + "|commute=" + commuteForPlanning.uppercase() + "|cooking=" + if (cooksFood == "Yes") "YES" else "NO"
                                     ).name) +
                                     (scanResult?.let { s -> "|scan_food=" + s.monthlyFor("Food").toInt() } ?: "")
                             )
@@ -963,18 +1094,46 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
         }
     }
 
-    if (showPicker) {
+    if (showStartPicker) {
         DatePickerDialog(
-            onDismissRequest = { showPicker = false },
+            onDismissRequest = { showStartPicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    pickerState.selectedDateMillis?.let { endMillis = it }
-                    showPicker = false
+                    startPickerState.selectedDateMillis?.let { semesterStartMillis = it }
+                    showStartPicker = false
                 }) { Text("Set") }
             },
-            dismissButton = { TextButton(onClick = { showPicker = false }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { showStartPicker = false }) { Text("Cancel") } }
         ) {
-            DatePicker(state = pickerState)
+            DatePicker(state = startPickerState)
+        }
+    }
+    if (showEndPicker) {
+        DatePickerDialog(
+            onDismissRequest = { showEndPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    endPickerState.selectedDateMillis?.let { endMillis = it }
+                    showEndPicker = false
+                }) { Text("Set") }
+            },
+            dismissButton = { TextButton(onClick = { showEndPicker = false }) { Text("Cancel") } }
+        ) {
+            DatePicker(state = endPickerState)
+        }
+    }
+    if (showFeesDuePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showFeesDuePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    feesDuePickerState.selectedDateMillis?.let { feesDueMillis = it }
+                    showFeesDuePicker = false
+                }) { Text("Set") }
+            },
+            dismissButton = { TextButton(onClick = { showFeesDuePicker = false }) { Text("Cancel") } }
+        ) {
+            DatePicker(state = feesDuePickerState)
         }
     }
 }
@@ -1038,7 +1197,16 @@ private fun GrandOpening(onBegin: () -> Unit, onSkip: () -> Unit) {
                     color = Color.White.copy(alpha = 0.92f)
                 )
                 Spacer(modifier = Modifier.height(24.dp))
-                OpeningRow("📩", t("Auto-tracking", "Kufuatilia", "Auto-track", "Auto-tracking"), t("M-Pesa texts become ledger rows. You just confirm.", "SMS za M-Pesa zinakuwa records. Wewe unaconfirm tu.", "Texts za M-Pesa zinakuwa rows. Confirm tu.", "M-Pesa texts zinakuwa rows — confirm tu."))
+                OpeningRow(
+                    "📩",
+                    t("Auto-tracking", "Kufuatilia", "Auto-track", "Auto-tracking"),
+                    t(
+                        "M-Pesa texts are matched on your phone. Most wait for your review; trusted matches may be filed automatically.",
+                        "SMS za M-Pesa hulinganishwa kwa simu yako. Nyingi unasoma kwanza; zinazotambulika vizuri zinaweza kuhifadhiwa moja kwa moja.",
+                        "Texts za M-Pesa zina-matchiwa kwa simu yako. Nyingi unareview kwanza; trusted matches zinaweza kufilewa auto.",
+                        "M-Pesa texts zina-matchiwa kwa simu yako. Nyingi zinasubiri review; trusted matches zinaweza kufilewa auto."
+                    )
+                )
                 OpeningRow("🎯", t("Budgets that update", "Bajeti zinazo-update", "Budget live", "Budgets live"), t("What you enter now flows into budgets, net worth and planners.", "Unachoingiza sasa kinaingia bajeti, net worth na planners.", "Kile unaingiza sai kinaingia budget, net worth na planners.", "Kile unaingiza sai kinaingia budgets, net worth, planners."))
                 OpeningRow("🗣️", t("Your language", "Lugha yako", "Lugha yako", "Lugha yako"), t("English, Kiswahili, Sheng or Mix — reports included.", "Kingereza, Kiswahili, Sheng ama Mix — ripoti pia.", "English, Swahili, Sheng ama Mix — repoti pia.", "English, Swahili, Sheng ama Mix — reports pia."))
                 Spacer(modifier = Modifier.height(20.dp))
@@ -1054,10 +1222,10 @@ private fun GrandOpening(onBegin: () -> Unit, onSkip: () -> Unit) {
                 )
                 Text(
                     t(
-                        "Heads up: we will ask for SMS + notification access so auto-tracking works.",
-                        "Kumbuka: tutaomba ruhusa ya SMS na notifications ili auto-tracking ifanye.",
-                        "Heads up: tutaomba SMS + notifications ndio auto-track ifanye.",
-                        "Heads up: tutaomba SMS + notifications ndio auto-tracking ifanye."
+                        "SMS access is optional for auto-tracking. Notification permission is requested only if you enable alerts.",
+                        "Ruhusa ya SMS ni ya hiari kwa auto-tracking. Ruhusa ya notifications huombwa ukiwasha alerts.",
+                        "SMS access ni optional kwa auto-track. Notifications tutaomba ukiwasha alerts.",
+                        "SMS access ni optional kwa auto-tracking. Notification permission huombwa ukiwasha alerts."
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFD4AF37)
@@ -1082,11 +1250,31 @@ private fun GrandOpening(onBegin: () -> Unit, onSkip: () -> Unit) {
                 ) { Text(t("Begin — 2 mins", "Anza — dakika 2", "Begin — 2 mins", "Begin — 2 mins"), fontWeight = FontWeight.Bold) }
                 Spacer(modifier = Modifier.height(4.dp))
                 TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) {
-                    Text(t("Skip → explore with sample data", "Ruka → sample data", "Skip → sample data", "Skip → sample data"), color = Color.White.copy(alpha = 0.8f))
+                    Text(t("Explore sample data", "Angalia data ya mfano", "Explore sample data", "Explore sample data"), color = Color.White.copy(alpha = 0.8f))
                 }
             }
         }
     }
+}
+
+@Composable
+private fun DemoDataConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Explore sample data?", fontWeight = FontWeight.Bold) },
+        text = {
+            Text(
+                "This loads clearly labeled example transactions, budgets, and a savings goal. " +
+                    "They are not your financial records. You can remove them later in Settings."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Yes, load demo data") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Continue setup") }
+        }
+    )
 }
 
 

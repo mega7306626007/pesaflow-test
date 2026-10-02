@@ -9,6 +9,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 
 
@@ -39,6 +40,28 @@ fun categoryEmoji(category: String): String = when (category.lowercase()) {
     "salary", "income" -> "💰"
     "debt" -> "🤝"
     else -> "🧾"
+}
+
+
+/**
+ * Stable per-category chart color. The old index-based coloring repainted
+ * Food blue one week and red the next as categories came and went — same
+ * category, same color, every chart, every screen. Big envelopes get fixed
+ * hues; everything else hashes deterministically into the palette.
+ */
+fun categoryChartColor(category: String): Color {
+    val key = category.trim().lowercase()
+    val fixed = when (key) {
+        "food" -> 2 // gold
+        "rent" -> 0 // blue
+        "transport" -> 3 // info
+        "airtime", "data", "internet" -> 4 // warning
+        "savings", "investment" -> 1 // income green
+        "salary", "income" -> 1
+        else -> null
+    }
+    val idx = fixed ?: ((key.hashCode() and Int.MAX_VALUE) % ChartPalette.size)
+    return ChartPalette[idx % ChartPalette.size]
 }
 
 

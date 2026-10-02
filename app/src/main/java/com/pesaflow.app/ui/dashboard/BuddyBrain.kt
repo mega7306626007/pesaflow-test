@@ -136,4 +136,28 @@ object BuddyBrain {
         val lb = LABELS[b.name] ?: return null
         return "Do you mean $la or $lb? Add one more word — e.g. 'budget left?' or 'food spending?'."
     }
+
+    // Trained-model assist: expansion phrases routing an ML intent into its
+    // VERIFIED keyword branch. Only mapped intents resolve; anything else
+    // returns null and the generic fallback stays. Pure, unit-tested.
+    private val ML_INTENT_EXPANSION = mapOf(
+        "balance_query" to "balance",
+        "affordability_check" to "can i afford",
+        "financial_constraint_update" to "survive till month end",
+        "week_summary" to "summary",
+        "month_compare" to "compare vs last",
+        "food_query" to "food how much spend",
+        "bills_query" to "bill due",
+        "budget_query" to "budget",
+        "savings_query" to "saved",
+        "runout_query" to "run out",
+        "safe_spend_query" to "can i spend",
+        "greeting" to "hello"
+    )
+
+    fun mlAssistExpansion(mlLabel: String): String? = ML_INTENT_EXPANSION[mlLabel]
+
+    /** The model may speak only when rules are blank and it is sure. */
+    fun shouldMlAssist(ruleTopConf: Float, mlConf: Float): Boolean =
+        ruleTopConf < 0.35f && mlConf >= 0.7f
 }

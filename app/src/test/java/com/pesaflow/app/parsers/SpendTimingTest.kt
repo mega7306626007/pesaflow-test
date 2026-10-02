@@ -22,6 +22,20 @@ class SpendTimingTest {
     }
 
     @Test
+    fun `onboarding equity is not a payday`() {
+        // Pocket + upkeep seeded together used to fake a 2-payday splurge in
+        // every onboarding month. Opening rows must never count.
+        val rows = listOf(
+            LedgerRow(5000.0, TransactionType.INCOME, "Income", "Opening balance", base - 10 * day, isOpening = true),
+            LedgerRow(3000.0, TransactionType.INCOME, "Income", "Monthly upkeep", base - 10 * day, isOpening = true),
+            row(10000.0, TransactionType.INCOME, 40),
+            row(9000.0, TransactionType.EXPENSE, 39)
+        )
+        val r = paydaySplurge(rows)
+        assertTrue(r == null || r.paydays == 1)
+    }
+
+    @Test
     fun `instant splurger reads near one hundred percent`() {
         val rows = listOf(
             row(10000.0, TransactionType.INCOME, 40),

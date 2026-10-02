@@ -220,7 +220,8 @@ data class ChatMessage(
 fun processUserInput(
     userInput: String,
     viewModel: FinanceViewModel,
-    messages: MutableState<List<ChatMessage>>
+    messages: MutableState<List<ChatMessage>>,
+    mlAssisted: Boolean = false
 ) {
     // Add user message to chat
     messages.value = listOf(
@@ -234,6 +235,21 @@ fun processUserInput(
     val q = BuddyBrain.normalize(qRaw)
     BuddyBrain.rewriteFollowUp(qRaw, q)?.let { return processUserInput(it, viewModel, messages) }
     val early: String? = BuddyBrain.disambiguate(q)
+    // Trained-model assist: only when the rules draw a blank, once per
+    // query. A sure model routes into its verified branch; anything else
+    // falls through to the generic fallback exactly as before.
+    if (early == null && !mlAssisted) {
+        val ruleTop = BuddyBrain.classify(q).firstOrNull()?.conf ?: 0f
+        if (ruleTop < 0.35f) {
+            val ctx = viewModel.getApplication<android.app.Application>().applicationContext
+            val suggestion = com.pesaflow.app.data.ml.MlIntentAssist.suggest(ctx, qRaw)
+            if (suggestion != null && BuddyBrain.shouldMlAssist(ruleTop, suggestion.confidence)) {
+                BuddyBrain.mlAssistExpansion(suggestion.label)?.let { expansion ->
+                    return processUserInput("$userInput $expansion", viewModel, messages, mlAssisted = true)
+                }
+            }
+        }
+    }
     val txs = viewModel.allTransactions.value
     val nowCal = java.util.Calendar.getInstance()
     val nowMs = nowCal.timeInMillis
@@ -268,7 +284,8 @@ fun processUserInput(
     val yesterdayStart = dayStart - 24L * 60 * 60 * 1000
     val yesterdaySpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= yesterdayStart && it.dateTimestamp < dayStart }.sumOf { it.amount }
     val openBills = viewModel.bills.value.filter { it.status != "PAID" }
-    val openBillTotal = openBills.sumOf { it.amount }
+    val openBillTotal = openBills.filter { it.paidBy == "ME" }.sumOf { it.amount }
+    val externallyFundedBillTotal = openBills.filter { it.paidBy != "ME" }.sumOf { it.amount }
     val openDebts = viewModel.debts.value.filter { it.status != "PAID" }
     val openDebtTotal = openDebts.sumOf { it.amount }
     // Money already spoken for: unpaid bills + debts I owe. Runway/afford/safe
@@ -393,6 +410,18 @@ fun processUserInput(
         q.contains("split") ->
             "Open the Semester tab → rent splitter: set roommates 1–8 and per-person share updates live. Any budget can also be shared from the Budget tab. 🤝"
 
+        q.contains("transport") || q.contains("fare") || q.contains("nauli") || q.contains("matatu") || q.contains("boda") ->
+            run {
+                val facts = viewModel.userContextFacts.value
+                val home = facts["housing.current"] ?: "home"
+                val mode = facts["transport.primaryMode"] ?: "your usual mode"
+                val stages = facts["transport.homeToCampus"]
+                if (txs.isEmpty()) "No spending logged yet — I'll estimate transport once your ledger has data."
+                else "Your usual route: $home → campus by $mode" +
+                    (stages?.let { " via $it" } ?: "") +
+                    ". Log a fare and I'll track the real cost."
+            }
+
         q.contains("yesterday") || q.contains("jana") ->
             "Yesterday uli-spend KSh ${yesterdaySpend.toInt()}. Today so far: KSh ${todaySpend.toInt()}."
 
@@ -441,8 +470,16 @@ fun processUserInput(
 
         q.contains("bill") || q.contains("rent due") || q.contains("lipia") ->
             if (openBills.isEmpty()) "No open bills — nyumba iko sorted. 🎉"
-            else "You have ${openBills.size} open bill(s) totalling KSh ${openBillTotal.toInt()}: " +
-                openBills.take(3).joinToString("; ") { "${it.name} KSh ${it.amount.toInt()}" } + "."
+            else "You have ${openBills.size} open bill(s): KSh ${openBillTotal.toInt()} marked for you and KSh ${externallyFundedBillTotal.toInt()} marked for someone else to cover. " +
+                openBills.take(3).joinToString("; ") {
+                    "${it.name} KSh ${it.amount.toInt()} (${when (it.paidBy) {
+                        "ME" -> "you"
+                        "PARENTS" -> "parents"
+                        "SPONSOR" -> "sponsor"
+                        "HELB" -> "HELB"
+                        else -> "someone else"
+                    }})"
+                } + "."
 
         q.contains("debt") || q.contains("owe") || q.contains("borrow") || q.contains("madeni") || q.contains("deni") ->
             if (openDebts.isEmpty()) "No open debts on record. Clean slate! 🎉"

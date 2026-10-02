@@ -34,6 +34,7 @@ import com.pesaflow.app.R
 @Composable
 fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {}) {
     val profile by viewModel.universityProfile.collectAsState()
+    val financialSnapshot by viewModel.financialSnapshot.collectAsState()
     val transactions by viewModel.allTransactions.collectAsState()
     val bills by viewModel.bills.collectAsState()
     val debts by viewModel.debts.collectAsState()
@@ -82,7 +83,10 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
 
     val now = System.currentTimeMillis()
     val day = 24L * 60 * 60 * 1000
-    val end = profile?.semesterEndTimestamp?.takeIf { it > 0 } ?: (now + 120 * day)
+    // Honest countdown: no fabricated +120d fallback. Unset dates say so
+    // with a one-tap fix instead of a confident fake number.
+    val endSet = (profile?.semesterEndTimestamp ?: 0L) > now
+    val end = profile?.semesterEndTimestamp?.takeIf { it > now } ?: now
     val daysLeft = ((end - now) / day).coerceAtLeast(0)
     val openBills = bills.filter { it.status != "PAID" }
     val openDebts = debts.filter { it.status != "PAID" }
@@ -126,12 +130,23 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Text("Semester Countdown", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "$daysLeft days left",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    if (!endSet) {
+                        Text(
+                            "No dates set",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedButton(onClick = { onNavigate(NavRoutes.UNIVERSITY) }) { Text("Set semester dates →") }
+                    } else {
+                        Text(
+                            "$daysLeft days left",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     Text(
                         profile?.universityName?.takeIf { it.isNotBlank() }?.let { "$it · Semester ${profile?.currentSemester ?: 1}" } ?: "Set your university under More → University",
                         style = MaterialTheme.typography.bodySmall,
@@ -187,7 +202,12 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
 
 
             // Live planner (reused, same math everywhere)
-            UniversityFinancialPlanner(profile = profile, transactions = transactions, viewModel = viewModel)
+            UniversityFinancialPlanner(
+                profile = profile,
+                transactions = transactions,
+                committed = financialSnapshot.committed.toDouble(),
+                viewModel = viewModel
+            )
 
             // Rent / hostel split
             if (rentBills.isNotEmpty()) {
@@ -306,7 +326,19 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
                         )
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    val monthlyTransport = (fare.toDoubleOrNull() ?: 0.0) * 2 * (commuteDays.toIntOrNull() ?: 0) * 4.33
+                    // One rule for commute math: the tested Journey engine
+                    // (return fare × days), not a second inline formula.
+                    val commuteJourney = remember(fare, commuteDays) {
+                        com.pesaflow.app.data.finance.Journey(
+                            id = "semester-commute", from = "Home", to = "Campus",
+                            mode = "MATATU",
+                            fareOneWay = fare.toDoubleOrNull() ?: 0.0,
+                            daysPerWeek = commuteDays.toIntOrNull() ?: 0,
+                            verified = false
+                        )
+                    }
+                    val weeklyTransport = com.pesaflow.app.data.finance.journeyWeekly(commuteJourney)
+                    val monthlyTransport = com.pesaflow.app.data.finance.journeyMonthly(commuteJourney) ?: 0.0
                     if ((transportMonthly ?: 0.0) > 0) {
                         Text(
                             "Current Transport budget: KSh ${transportMonthly!!.toInt()}/month",
@@ -317,7 +349,8 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "≈ KSh ${monthlyTransport.toInt()}/month",
+                            "≈ KSh ${monthlyTransport.toInt()}/month" +
+                                (weeklyTransport?.let { " (KSh ${it.toInt()}/wk)" } ?: ""),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold
                         )

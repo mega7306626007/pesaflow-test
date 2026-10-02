@@ -17,10 +17,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
-import com.pesaflow.app.ui.theme.ChartPalette
 import com.pesaflow.app.ui.theme.DangerRed
 import com.pesaflow.app.ui.theme.SuccessGreen
 import com.pesaflow.app.ui.theme.WarningAmber
+import com.pesaflow.app.ui.theme.categoryChartColor
 import com.pesaflow.app.ui.theme.ppColors
 import com.pesaflow.app.ui.theme.ppTypography
 import androidx.compose.ui.geometry.Offset
@@ -40,9 +40,6 @@ fun MetricDistributionDonutChart(
     if (total == 0.0) return
 
 
-    val colors = ChartPalette
-
-
     Column(
         modifier = Modifier.fillMaxWidth().padding(16.dp).semantics {
             contentDescription = "Spending by category donut chart"
@@ -52,10 +49,10 @@ fun MetricDistributionDonutChart(
     ) {
         Canvas(modifier = Modifier.size(150.dp)) {
             var currentStartAngle = -90f
-            dataPoints.values.forEachIndexed { idx, value ->
-                val sweepAngle = ((value / total) * 360f).toFloat()
+            dataPoints.entries.forEach { entry ->
+                val sweepAngle = ((entry.value / total) * 360f).toFloat()
                 drawArc(
-                    color = colors[idx % colors.size],
+                    color = categoryChartColor(entry.key),
                     startAngle = currentStartAngle,
                     sweepAngle = sweepAngle,
                     useCenter = false,
@@ -69,9 +66,9 @@ fun MetricDistributionDonutChart(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            dataPoints.entries.forEachIndexed { idx, entry ->
+            dataPoints.entries.forEach { entry ->
                 val pct = (entry.value / total * 100).toInt()
-                val color = colors[idx % colors.size]
+                val color = categoryChartColor(entry.key)
                 FilterChip(
                     selected = selectedCategory == entry.key,
                     onClick = { onSelectCategory(entry.key) },

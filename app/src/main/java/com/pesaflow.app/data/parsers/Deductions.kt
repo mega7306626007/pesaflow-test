@@ -16,7 +16,12 @@ data class LedgerRow(
     val type: TransactionType,
     val category: String,
     val merchant: String,
-    val ts: Long
+    val ts: Long,
+    // Provenance rides along so rhythm/payday engines can exclude demo and
+    // onboarding-equity rows instead of treating them as habits/paydays.
+    // Defaulted: all existing call sites compile untouched.
+    val isSample: Boolean = false,
+    val isOpening: Boolean = false
 )
 
 enum class HypothesisKind { FARE, RENT, RECURRING }

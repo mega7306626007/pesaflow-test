@@ -14,7 +14,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -375,7 +381,9 @@ fun PpBottomBar(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier) {
+    // Edge-to-edge is on (decorFitsSystemWindows=false): lift the whole bar
+    // above the gesture pill / 3-button nav instead of drawing under it.
+    Column(modifier.navigationBarsPadding()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(ppColors.border))
         Row(
             Modifier
@@ -416,6 +424,69 @@ fun PpBottomBar(
                     )
                 }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------- segmented choice ---
+
+data class SegOption(val value: String, val label: String, val emoji: String = "")
+
+/**
+ * Single-select option group: big thumb-friendly cards instead of cramped
+ * chips. The picked card gets the gold rail + tint + tick; 5+ options scroll
+ * horizontally instead of crushing labels ("Wkday", "≤50" truncations die).
+ */
+@Composable
+fun SegChoice(
+    options: List<SegOption>,
+    selected: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (options.size > 4) {
+        Row(
+            modifier = modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            options.forEach { SegCell(it, it.value == selected, { onSelect(it.value) }, Modifier.width(108.dp)) }
+        }
+    } else {
+        Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { SegCell(it, it.value == selected, { onSelect(it.value) }, Modifier.weight(1f)) }
+        }
+    }
+}
+
+@Composable
+private fun SegCell(opt: SegOption, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Card(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 56.dp),
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (selected) ppColors.gold else ppColors.border
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) ppColors.surfaceElevated else ppColors.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            if (opt.emoji.isNotBlank()) Text(opt.emoji, style = MaterialTheme.typography.titleMedium)
+            Text(
+                (if (selected) "✓ " else "") + opt.label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = ppColors.textPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

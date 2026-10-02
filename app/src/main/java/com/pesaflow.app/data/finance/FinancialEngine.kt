@@ -10,7 +10,7 @@ import java.util.Calendar
 // Kotlin, no Android. UI must consume FinancialSnapshot, never re-derive.
 // Known honest gaps (not masked): opening-upkeep rows are real ledger INCOME
 // here (separate opening-equity account arrives with postings, Phase 4);
-// partial bill payments have no model yet (amountRemaining == amount).
+// partial bill payments reduce the bill's amountRemaining.
 private const val DAY_MS = 24L * 60 * 60 * 1000
 private val ESSENTIAL_CATEGORIES = setOf("Rent", "School", "Health", "Food", "Transport")
 
@@ -124,7 +124,13 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
             else -> Unit
         }
     }
-    val liquid = spendableDelta.coerceAtLeast(Money.ZERO)
+    // Liquid is NEVER floored: flooring printed "Held KSh 0" next to a
+    // "Ledger -KSh 32,800" on the same screen. A negative ledger is real
+    // (more confirmed out than in) — the reconcile flow explains and fixes
+    // it; hiding it breaks trust in every number. Downstream guards
+    // (flexible, safe-figures) floor their own outputs where spending
+    // advice, not accounting truth, is shown.
+    val liquid = spendableDelta
     val totalAssets = liquid + savedWealth
     val debtsOwed = input.debts.filter { it.status != "PAID" && it.direction == "I_OWE" }
     val totalLiabilities = Money.of(debtsOwed.sumOf { it.amount })
@@ -141,7 +147,7 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
 
     // Obligations: time-aware reserves + urgency (§8–§9). Paid bills are gone;
     // only real payment events move cash (bill rows alone never book money).
-    val openBills = input.bills.filter { it.status != "PAID" }
+    val openBills = input.bills.filter { it.status != "PAID" && it.paidBy == "ME" }
     val obligations = openBills.map { b ->
         val owed = b.amountRemaining.takeIf { it > 0 } ?: b.amount
         val days = ((b.dueDate - now) / DAY_MS).toInt()
@@ -170,7 +176,16 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
     val fees = Money.of(input.feesAmount)
     val feesCovered = if (input.helbExpected > 0 && input.feesAmount > 0) minOf(helb, fees) else Money.ZERO
     val upkeep = if (input.helbExpected > 0) (helb - feesCovered).coerceAtLeast(Money.ZERO) else Money.ZERO
-    val upcomingFees = (fees - feesCovered).coerceAtLeast(Money.ZERO)
+    // A fee bill is the authoritative outstanding amount when present. Do not
+    // reserve the profile's fee estimate again on top of that same obligation.
+    val hasTrackedFeeBill = openBills.any { bill ->
+        listOf(bill.name, bill.category).any { text ->
+            text.lowercase().split(Regex("[^a-z0-9]+")).any {
+                it == "fee" || it == "fees" || it == "tuition"
+            }
+        }
+    }
+    val upcomingFees = if (hasTrackedFeeBill) Money.ZERO else (fees - feesCovered).coerceAtLeast(Money.ZERO)
 
     // Goal reservations (§10): remaining + recommended pace, labeled projected.
     val goalReservations = input.goals.map { g ->
@@ -300,7 +315,8 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
     val safeWeek = horizonValue(7, reliableMonthly * (7.0 / 30), obligations)
     val safeUntilIncome = horizonValue(untilIncomeDays, reliableMonthly * (untilIncomeDays / 30.0), obligations)
     val safeMonth = horizonValue(monthDaysLeft, reliableMonthly * (monthDaysLeft / 30.0), obligations)
-    val safeSemester = (flexible - upcomingFees - reservedGoals).coerceAtLeast(Money.ZERO)
+    // flexible already subtracts bills, debts, fee reserves, and goal reserves.
+    val safeSemester = flexible
 
     // Forecast scenarios (§19, Phase 9 engine): robust daily paces, one-offs
     // quarantined. Output is month-end FLEXIBLE money.

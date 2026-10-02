@@ -62,7 +62,8 @@ fun projectCashFlow(
     }
 
     paydays.forEach { (label, amount, next) -> addEvent(startOfDay(next), label, amount) }
-    bills.filter { it.status != "PAID" }.forEach { b -> addEvent(startOfDay(b.dueDate), b.name, -b.amount) }
+    bills.filter { it.status != "PAID" && it.paidBy == "ME" }
+        .forEach { b -> addEvent(startOfDay(b.dueDate), b.name, -b.amount) }
     recurring.filter { it.medianIntervalDays in 25..35 }.forEach { r ->
         addEvent(startOfDay(r.nextExpectedDate), r.merchant, -r.amount)
     }

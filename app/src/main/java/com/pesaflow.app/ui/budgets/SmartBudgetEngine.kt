@@ -1,6 +1,8 @@
 package com.pesaflow.app.ui.budgets
 
+import com.pesaflow.app.data.models.Bill
 import com.pesaflow.app.data.models.BudgetType
+import kotlin.math.ceil
 import kotlin.math.round
 
 // Six researched setups — rent is NOT universal. Living with parents means a
@@ -176,6 +178,22 @@ fun periodNameOf(type: BudgetType): String = when (type) {
     BudgetType.MONTHLY -> "monthly"
     BudgetType.SEMESTER -> "semester"
     else -> "annual"
+}
+
+fun monthlyBillReserve(bill: Bill, now: Long): Int {
+    if (bill.paidBy != "ME") return 0
+    val remaining = bill.amountRemaining.takeIf { it > 0 } ?: bill.amount
+    if (remaining <= 0) return 0
+    return when (bill.frequency.uppercase()) {
+        "MONTHLY" -> ceil(remaining).toInt()
+        "WEEKLY" -> ceil(remaining * 52.0 / 12.0).toInt()
+        "DAILY" -> ceil(remaining * 30.0).toInt()
+        else -> {
+            val daysUntilDue = ceil((bill.dueDate - now).coerceAtLeast(0L) / 86_400_000.0).toInt()
+            if (daysUntilDue <= 30) ceil(remaining).toInt()
+            else ceil(remaining * 30.0 / daysUntilDue).toInt().coerceAtMost(ceil(remaining).toInt())
+        }
+    }
 }
 
 /**

@@ -5,7 +5,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 
-// Twenty branches exist; each case sees only its relevant subset.
+// Twenty-three branches exist; each case sees only its relevant subset.
 class WelcomeBranchesTest {
 
     private fun answers(vararg pairs: Pair<String, String>) = mapOf(*pairs)
@@ -20,7 +20,22 @@ class WelcomeBranchesTest {
         assertFalse(seen.contains("classTimes"))
         assertFalse(seen.contains("helb"))
         assertTrue(seen.contains("upkeep"))
-        assertTrue(seen.size < 20)
+        assertTrue(seen.contains("walkOk"))
+        assertTrue(seen.size < 23)
+    }
+
+    @Test
+    fun `impractical walk reveals fare and class time questions`() {
+        val practical = visibleBranches(
+            answers("home" to "Parents", "commute" to "Walk", "walkOk" to "Yes", "fundSource" to "SELF")
+        )
+        val impractical = visibleBranches(
+            answers("home" to "Parents", "commute" to "Walk", "walkOk" to "No", "fundSource" to "SELF")
+        )
+        assertFalse(practical.contains("fare"))
+        assertFalse(practical.contains("classTimes"))
+        assertTrue(impractical.contains("fare"))
+        assertTrue(impractical.contains("classTimes"))
     }
 
     @Test
@@ -32,7 +47,21 @@ class WelcomeBranchesTest {
         assertTrue(seen.contains("fare"))
         assertTrue(seen.contains("classTimes"))
         assertTrue(seen.contains("helb"))
-        assertEquals(20, seen.size)
+        assertTrue(seen.contains("stages"))
+        // 20 base + stages (no walkOk for Far, no grocery without cooks key).
+        assertEquals(21, seen.size)
+    }
+
+    @Test
+    fun `cooks see the grocery branch non cooks do not`() {
+        val cooks = visibleBranches(
+            answers("home" to "Hostel", "commute" to "Near", "fundSource" to "HELB", "cooks" to "Yes")
+        )
+        val buyers = visibleBranches(
+            answers("home" to "Hostel", "commute" to "Near", "fundSource" to "HELB", "cooks" to "No")
+        )
+        assertTrue(cooks.contains("grocery"))
+        assertFalse(buyers.contains("grocery"))
     }
 
     @Test

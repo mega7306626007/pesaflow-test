@@ -58,8 +58,9 @@ fun SafeToSpendCard(
     }
     val planDaily = goals.sumOf { planDailyRate(it) }.toInt()
     val topPlan = goals.filter { it.targetAmount > it.currentAmount }.maxByOrNull { it.targetAmount - it.currentAmount }
-    // PocketGuard-style leftover: upcoming open bills also come off the top, daily-shared
-    val billDaily = bills.filter { it.status != "PAID" }.sumOf { it.amount }.let { if (it > 0) (it / 30).toInt() else 0 }
+    // PocketGuard-style leftover: bills due within 30 days come off the top,
+    // daily-shared. Far-future bills (December fees in October) wait their turn.
+    val billDaily = reserveBillDaily(bills, nowMs)
     val planNote = topPlan?.let { " That cash comes out of ${it.title}." } ?: ""
     var mode by remember { mutableStateOf("Day") }
     com.pesaflow.app.ui.theme.PpCard(kind = com.pesaflow.app.ui.theme.PpCardKind.LARGE) {
@@ -204,8 +205,10 @@ fun SafeToSpendCard(
                     it.type == com.pesaflow.app.data.models.TransactionType.EXPENSE && !it.isSample &&
                         it.dateTimestamp in week && inPastOrNow(it.dateTimestamp, nowMs)
                 }.sumOf { it.amount }.toInt()
+                // Allowance is exactly the target: last week's balance is copy,
+                // not math (weeklyAllowance pins this — rollover doubled it).
                 val weekRollover = weekTarget - prevWeekSpend
-                val weekAllowance = weekTarget + weekRollover
+                val weekAllowance = weeklyAllowance(weekTarget)
                 val weekLeft = weekAllowance - thisWeekSpend
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -232,7 +235,7 @@ fun SafeToSpendCard(
                 Text(
                     when {
                         weekAllowance <= 0 ->
-                            "Last week went KSh ${-weekRollover} over and wiped this week out — essentials only. 🛑"
+                            "No weekly target set — add a Weekly budget or monthly ALL on the Budget tab and I'll pace it. 🎯"
                         weekAllowance < 100 * 7 ->
                             "KSh $weekAllowance this week (~KSh ${(weekAllowance / 7).toInt()}/day) — prioritize: Food KSh ${(weekAllowance * 0.6).toInt()} + essentials KSh ${(weekAllowance * 0.4).toInt()}. 💪"
                         prevWeekSpend <= weekTarget ->

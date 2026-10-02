@@ -32,6 +32,18 @@ data class IncomeSource(
         else -> expectedAmount
     }
 
+    // Days until this source's next dated landing (HELB/bank day-of-month).
+    // Undated, daily/weekly (continuous) and one-off sources don't anchor a
+    // horizon — null. Pure, unit-tested.
+    fun daysUntilLanding(nowMs: Long = System.currentTimeMillis()): Int? {
+        if (frequency != "MONTHLY" || dayOfMonth !in 1..31) return null
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = nowMs }
+        val today = cal.get(java.util.Calendar.DAY_OF_MONTH)
+        val dim = cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+        val target = dayOfMonth.coerceAtMost(dim)
+        return if (target >= today) target - today else (dim - today) + target
+    }
+
     fun frequencyLabel(): String = when (frequency) {
         "DAILY" -> "daily"
         "WEEKLY" -> "weekly"
@@ -138,3 +150,12 @@ object IncomeSourceStore {
     fun autoTrackedKinds(context: Context): List<String> =
         load(context).filter { it.autoTrack }.map { it.displayKind() }.distinct()
 }
+
+
+/**
+ * Days until the nearest dated monthly inflow across all sources — the
+ * dynamic horizon cash planning should count down to. Null when nothing is
+ * dated (horizon falls back to month/semester bounds). Pure, unit-tested.
+ */
+fun nextInflowDay(sources: List<IncomeSource>, nowMs: Long = System.currentTimeMillis()): Int? =
+    sources.mapNotNull { it.daysUntilLanding(nowMs) }.minOrNull()

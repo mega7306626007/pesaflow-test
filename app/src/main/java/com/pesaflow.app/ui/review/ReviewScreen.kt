@@ -241,12 +241,14 @@ fun ReviewScreen(viewModel: FinanceViewModel) {
                                 if (grade != "A+") {
                                     TextButton(onClick = {
                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        // Auto-fix the obvious: learned or keyword-certain
-                                        // categories. Ambiguous rows stay for human eyes.
+                                        // Auto-fix the obvious: learned memory first, then the
+                                        // trained scorer at high confidence, then keyword
+                                        // certainty. Ambiguous rows stay for human eyes.
                                         uncategorized.forEach { tx ->
                                             val fix = com.pesaflow.app.data.ledger.CategoryMemory.lookup(
                                                 reviewPrefs, tx.merchant
-                                            ) ?: com.pesaflow.app.data.parsers.MpesaParser.inferCategory(tx.merchant, tx.type).takeIf { it != "Other" }
+                                            ) ?: com.pesaflow.app.data.ml.MlCategoryAssist.suggest(reviewCtx, tx.merchant)?.label
+                                            ?: com.pesaflow.app.data.parsers.MpesaParser.inferCategory(tx.merchant, tx.type).takeIf { it != "Other" }
                                             if (fix != null) viewModel.replaceTransaction(tx.id, tx.copy(category = fix))
                                         }
                                     }) { Text("Auto-fix", style = com.pesaflow.app.ui.theme.ppTypography.labelMedium, color = com.pesaflow.app.ui.theme.ppColors.gold) }
@@ -332,6 +334,26 @@ fun ReviewScreen(viewModel: FinanceViewModel) {
                                         Text("$ageDays d old", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                     }
                                     Text(p.category, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    // Model second opinion: trained type classifier,
+                                    // never an override — a badge that asks for eyes.
+                                    val modelSay = remember(p.id, p.rawText) {
+                                        com.pesaflow.app.data.ml.MlTypeAssist.suggest(reviewCtx, "", p.rawText)
+                                    }
+                                    val modelType = when (modelSay?.label) {
+                                        "EXPENSE" -> com.pesaflow.app.data.models.TransactionType.EXPENSE
+                                        "INCOME" -> com.pesaflow.app.data.models.TransactionType.INCOME
+                                        "TRANSFER" -> com.pesaflow.app.data.models.TransactionType.TRANSFER
+                                        "SAVING" -> com.pesaflow.app.data.models.TransactionType.SAVING
+                                        else -> null
+                                    }
+                                    if (modelSay != null && modelSay.confidence >= 0.8f && modelType != p.type) {
+                                        Text(
+                                            if (modelSay.label == "NULL") "🤖 Model flags not-money (${(modelSay.confidence * 100).toInt()}%) — check me"
+                                            else "🤖 Model reads ${modelSay.label} (${(modelSay.confidence * 100).toInt()}%) — check me",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.tertiary
+                                        )
+                                    }
                                     rhythmEvidence[p.merchant.lowercase()]?.takeIf {
                                         it.amount > 0 && kotlin.math.abs(p.amount - it.amount) / it.amount <= 0.25
                                     }?.let { d ->
@@ -353,12 +375,25 @@ fun ReviewScreen(viewModel: FinanceViewModel) {
                             )
                         }
                         items(uncategorized, key = { it.id }) { tx ->
-                            Box(Modifier) {
-                                TransactionRow(
-                                    tx = tx,
-                                    onEdit = { editingTx = tx },
-                                    onDelete = { confirmDelete = tx }
-                                )
+                            val catSuggest = remember(tx.id, tx.merchant) {
+                                com.pesaflow.app.data.ml.MlCategoryAssist.suggest(reviewCtx, tx.merchant)
+                            }
+                            Column {
+                                if (catSuggest != null) {
+                                    Text(
+                                        "Model: ${catSuggest.label} (${(catSuggest.confidence * 100).toInt()}%)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                        modifier = Modifier.padding(start = PesaSpacing.sm)
+                                    )
+                                }
+                                Box(Modifier) {
+                                    TransactionRow(
+                                        tx = tx,
+                                        onEdit = { editingTx = tx },
+                                        onDelete = { confirmDelete = tx }
+                                    )
+                                }
                             }
                         }
                     }

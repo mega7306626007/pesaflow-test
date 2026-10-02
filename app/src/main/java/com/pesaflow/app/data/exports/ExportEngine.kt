@@ -126,6 +126,27 @@ class ExportEngine(
             sb.append(quote(d.direction))
             sb.append("\n")
         }
+        profile?.let { p ->
+            sb.append("\n# UNIVERSITY PROFILE\n")
+            sb.append("field,value\n")
+            listOf(
+                "university" to p.universityName,
+                "campus" to p.campus,
+                "programme" to p.programme,
+                "year_of_study" to p.yearOfStudy,
+                "semester" to p.currentSemester.toString(),
+                "academic_year" to p.academicYear,
+                "semester_start" to p.semesterStartTimestamp.takeIf { it > 0L }?.let { dateFmt.format(Date(it)) }.orEmpty(),
+                "semester_end" to p.semesterEndTimestamp.takeIf { it > 0L }?.let { dateFmt.format(Date(it)) }.orEmpty(),
+                "starting_funding_ksh" to p.startingFunding.toString(),
+                "helb_expected_ksh" to p.helbExpected.toString(),
+                "fees_amount_ksh" to p.feesAmount.toString(),
+                "fees_due_date" to p.feesDueDate.takeIf { it > 0L }?.let { dateFmt.format(Date(it)) }.orEmpty(),
+                "funding_source" to p.fundingSource
+            ).forEach { (field, value) ->
+                sb.append(quote(field)).append(",").append(quote(value)).append("\n")
+            }
+        }
         return sb.toString()
     }
 

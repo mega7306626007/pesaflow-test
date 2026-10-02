@@ -35,4 +35,32 @@ class IncomeSourceTest {
             0.001
         )
     }
+
+    @Test
+    fun `next inflow counts down to dated monthly sources`() {
+        // Sep 13: HELB day 20 → 7 days; guardian day 5 → passed, wraps to Oct 5 (22 days).
+        val now = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.SEPTEMBER, 13, 9, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val sources = listOf(
+            IncomeSource(kind = "HELB_MPESA", expectedAmount = 8080.0, frequency = "MONTHLY", dayOfMonth = 20),
+            IncomeSource(kind = "GUARDIAN", expectedAmount = 5000.0, frequency = "MONTHLY", dayOfMonth = 5),
+            IncomeSource(kind = "HUSTLE", expectedAmount = 100.0, frequency = "DAILY"),
+            IncomeSource(kind = "JOB", expectedAmount = 15000.0, frequency = "MONTHLY", dayOfMonth = 0)
+        )
+        assertEquals(7, com.pesaflow.app.data.income.nextInflowDay(sources, now))
+    }
+
+    @Test
+    fun `no dated sources means no inflow horizon`() {
+        val now = System.currentTimeMillis()
+        assertNull(
+            com.pesaflow.app.data.income.nextInflowDay(
+                listOf(IncomeSource(kind = "HUSTLE", frequency = "DAILY")),
+                now
+            )
+        )
+        assertNull(com.pesaflow.app.data.income.nextInflowDay(emptyList(), now))
+    }
 }

@@ -12,9 +12,8 @@ import java.util.Calendar
 // - ATTACHMENT: practicum/attachment months — a third regime, never "normal".
 // - PRE_UNI: before campus life started (first-years, gap years) — labeled, not averaged.
 //
-// Layer order: stated semester dates (onboarding profile) always
-// win; university typical-pattern defaults only prefill empty date fields;
-// transport-collapse auto-detection proposes break months the calendar missed
+// Stated semester dates are user-provided and are the only calendar basis.
+// Transport-collapse detection proposes break months the calendar missed
 // (strikes, late reporting, gap years) for one-tap confirmation.
 enum class Regime { SESSION, BREAK, ATTACHMENT, PRE_UNI }
 
@@ -84,35 +83,7 @@ fun detectBreakMonths(
     return monthlyTransport.filter { it.value < collapseRatio * median }.keys
 }
 
-/** Typical-pattern prefill defaults (Layer 2): convenience, never truth. */
-data class UniDefault(
-    val name: String,
-    val startMonth: Int,
-    val startDay: Int,
-    val endMonth: Int,
-    val endDay: Int,
-    val note: String = ""
-)
-
-val UNIVERSITY_DEFAULTS = listOf(
-    UniDefault("University of Nairobi", 9, 1, 4, 30),
-    UniDefault("Kenyatta University", 9, 1, 4, 30),
-    UniDefault("JKUAT", 9, 1, 4, 30),
-    UniDefault("Moi University", 9, 1, 4, 30),
-    UniDefault("Egerton University", 9, 1, 4, 30),
-    UniDefault("Maseno University", 9, 1, 4, 30),
-    UniDefault("Masinde Muliro (MMUST)", 9, 1, 4, 30),
-    UniDefault("Kisii University", 9, 1, 4, 30),
-    UniDefault("Technical University of Kenya", 9, 8, 4, 30),
-    UniDefault("Pwani University", 9, 1, 4, 30),
-    UniDefault("University of Eldoret", 9, 1, 4, 30),
-    UniDefault("Chuka University", 9, 1, 4, 30),
-    UniDefault("South Eastern Kenya (SEKU)", 9, 7, 4, 2),
-    UniDefault("Co-operative University", 9, 1, 4, 30),
-    UniDefault("KCA University", 8, 25, 4, 30, "Confirm — intakes shift; weekend tracks differ"),
-    UniDefault("Daystar University", 9, 1, 4, 30, "Trimester school — confirm dates, do not trust blindly")
-)
-
+/** A single student's explicitly chosen academic windows. */
 /** Per-regime slice of a scan: session pace is normalized per-day, never per-month. */
 data class RegimeSlice(
     val regime: Regime,
@@ -160,26 +131,3 @@ fun monthlyTransportSeries(parsed: List<PendingTransaction>): Map<String, Double
  * back to 240 days before the stated end. Prefill-grade, never truth — the
  * confirmation queue lets the student correct it in one tap.
  */
-fun guessSemesterStart(
-    universityName: String,
-    semesterEnd: Long,
-    now: Long = System.currentTimeMillis()
-): Long {
-    if (universityName.isNotBlank()) {
-        val match = UNIVERSITY_DEFAULTS.firstOrNull {
-            universityName.contains(it.name, ignoreCase = true) ||
-                it.name.contains(universityName, ignoreCase = true)
-        }
-        if (match != null) {
-            val cal = Calendar.getInstance().apply { timeInMillis = now }
-            val startYear =
-                if (cal.get(Calendar.MONTH) + 1 >= match.startMonth) cal.get(Calendar.YEAR)
-                else cal.get(Calendar.YEAR) - 1
-            return Calendar.getInstance().apply {
-                set(startYear, match.startMonth - 1, match.startDay, 0, 0, 0)
-                set(Calendar.MILLISECOND, 0)
-            }.timeInMillis
-        }
-    }
-    return semesterEnd - 240 * DAY_MS
-}

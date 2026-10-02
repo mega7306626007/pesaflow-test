@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pesaflow.app.data.models.Transaction
@@ -18,6 +19,9 @@ import com.pesaflow.app.data.models.UniversityProfile
 import com.pesaflow.app.viewmodels.FinanceViewModel
 import com.pesaflow.app.ui.theme.AtmoWorkspace
 import com.pesaflow.app.R
+import com.pesaflow.app.data.finance.Money
+import com.pesaflow.app.data.finance.MoneyFormatter
+import com.pesaflow.app.data.finance.calculateSemesterRunway
 import com.pesaflow.app.ui.theme.CinematicBackdrop
 import com.pesaflow.app.ui.theme.SkinAccentLine
 import com.pesaflow.app.ui.theme.SkinCampus
@@ -31,6 +35,13 @@ import androidx.compose.foundation.verticalScroll
 fun UniversityScreen(viewModel: FinanceViewModel) {
     val universityProfile by viewModel.universityProfile.collectAsState()
     val transactions by viewModel.allTransactions.collectAsState()
+    val financialSnapshot by viewModel.financialSnapshot.collectAsState()
+    // Explicit save receipts: profile edits used to close silently, so
+    // "did it save?" was unanswerable on-device.
+    val screenContext = LocalContext.current
+    fun savedToast(msg: String) {
+        android.widget.Toast.makeText(screenContext, msg, android.widget.Toast.LENGTH_SHORT).show()
+    }
     var showEditDialog by remember { mutableStateOf(false) }
     var showAllowanceDialog by remember { mutableStateOf(false) }
     var showSavingsDialog by remember { mutableStateOf(false) }
@@ -93,6 +104,8 @@ fun UniversityScreen(viewModel: FinanceViewModel) {
                     UniversityProfileCard(
                         universityName = profile.universityName,
                         campus = profile.campus,
+                        programme = profile.programme,
+                        yearOfStudy = profile.yearOfStudy,
                         currentSemester = profile.currentSemester,
                         academicYear = profile.academicYear,
                         startingFunding = profile.startingFunding
@@ -101,6 +114,8 @@ fun UniversityScreen(viewModel: FinanceViewModel) {
                     UniversityProfileCard(
                         universityName = "--",
                         campus = "--",
+                        programme = "",
+                        yearOfStudy = "",
                         currentSemester = 1,
                         academicYear = "--",
                         startingFunding = 0.0
@@ -112,6 +127,7 @@ fun UniversityScreen(viewModel: FinanceViewModel) {
                 UniversityFinancialPlanner(
                     profile = profile,
                     transactions = transactions,
+                    committed = financialSnapshot.committed.toDouble(),
                     viewModel = viewModel
                 )
 
@@ -146,50 +162,78 @@ fun UniversityScreen(viewModel: FinanceViewModel) {
         val current = universityProfile
         var name by remember { mutableStateOf(current?.universityName ?: "") }
         var campus by remember { mutableStateOf(current?.campus ?: "") }
+        var programme by remember { mutableStateOf(current?.programme ?: "") }
+        var yearOfStudy by remember { mutableStateOf(current?.yearOfStudy ?: "") }
         var semester by remember { mutableStateOf((current?.currentSemester ?: 1).toString()) }
         var year by remember { mutableStateOf(current?.academicYear ?: "") }
         var fees by remember { mutableStateOf((current?.feesAmount ?: 0.0).takeIf { it > 0 }?.toInt()?.toString() ?: "") }
         var helb by remember { mutableStateOf((current?.helbExpected ?: 0.0).takeIf { it > 0 }?.toInt()?.toString() ?: "") }
         var fundSource by remember { mutableStateOf(current?.fundingSource ?: "HELB") }
-        var weeksLeft by remember { mutableStateOf("") }
+        var semesterStart by remember { mutableStateOf(current?.semesterStartTimestamp ?: 0L) }
+        var semesterEnd by remember { mutableStateOf(current?.semesterEndTimestamp ?: 0L) }
+        var feesDueDate by remember { mutableStateOf(current?.feesDueDate ?: 0L) }
+        var profileError by remember { mutableStateOf<String?>(null) }
 
         AlertDialog(
             onDismissRequest = { showEditDialog = false },
             title = { Text("Edit University Profile") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("University") })
                     OutlinedTextField(value = campus, onValueChange = { campus = it }, label = { Text("Campus") })
+                    OutlinedTextField(value = programme, onValueChange = { programme = it }, label = { Text("Programme or course (optional)") })
+                    OutlinedTextField(value = yearOfStudy, onValueChange = { yearOfStudy = it }, label = { Text("Year of study (optional)") })
                     OutlinedTextField(value = semester, onValueChange = { semester = it }, label = { Text("Semester") })
                     OutlinedTextField(value = year, onValueChange = { year = it }, label = { Text("Academic Year") })
                     OutlinedTextField(value = fees, onValueChange = { fees = it }, label = { Text("Fees owed (KSh, optional)") })
                     OutlinedTextField(value = helb, onValueChange = { helb = it }, label = { Text("HELB expected (KSh, optional)") })
+                    TimestampPickerField("Semester start date", semesterStart) { semesterStart = it }
+                    TimestampPickerField("Semester end date", semesterEnd) { semesterEnd = it }
+                    TimestampPickerField("Fees due date", feesDueDate) { feesDueDate = it }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("HELB", "SELF", "BOTH").forEach { s ->
-                            FilterChip(selected = fundSource == s, onClick = { fundSource = s }, label = { Text(s) })
+                        FilterChip(selected = fundSource == s, onClick = { fundSource = s }, label = { Text(s) })
                         }
                     }
-                    OutlinedTextField(value = weeksLeft, onValueChange = { weeksLeft = it }, label = { Text("Weeks left in semester (sets countdown)") })
+                    profileError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             },
             confirmButton = {
                 Button(onClick = {
-                    val sem = semester.toIntOrNull() ?: 1
-                    val weeks = weeksLeft.toIntOrNull()?.takeIf { it > 0 }
-                    viewModel.saveUniversityProfile(
-                        (current ?: UniversityProfile()).copy(
-                            universityName = name.trim(),
-                            campus = campus.trim(),
-                            currentSemester = sem,
-                            academicYear = year.trim(),
-                            feesAmount = fees.toDoubleOrNull() ?: 0.0,
-                            helbExpected = helb.toDoubleOrNull() ?: 0.0,
-                            fundingSource = fundSource,
-                            semesterEndTimestamp = weeks?.let { System.currentTimeMillis() + it * 7 * 24L * 60 * 60 * 1000 }
-                                ?: (current?.semesterEndTimestamp ?: 0L)
+                    val sem = semester.toIntOrNull()
+                    val feesValue = fees.toDoubleOrNull() ?: 0.0
+                    val helbValue = helb.toDoubleOrNull() ?: 0.0
+                    when {
+                        sem == null || sem < 1 -> profileError = "Enter a valid semester number."
+                        feesValue < 0 || helbValue < 0 -> profileError = "Amounts cannot be negative."
+                        semesterStart > 0 && semesterEnd > 0 && semesterEnd <= semesterStart ->
+                        profileError = "Semester end must be after its start."
+                        else -> {
+                        viewModel.saveUniversityProfile(
+                            (current ?: UniversityProfile()).copy(
+                                universityName = name.trim(),
+                                campus = campus.trim(),
+                                programme = programme.trim(),
+                                yearOfStudy = yearOfStudy.trim(),
+                                currentSemester = sem,
+                                academicYear = year.trim(),
+                                feesAmount = feesValue,
+                                helbExpected = helbValue,
+                                feesDueDate = feesDueDate,
+                                fundingSource = fundSource,
+                                semesterStartTimestamp = semesterStart,
+                                semesterEndTimestamp = semesterEnd
+                            )
                         )
-                    )
-                    showEditDialog = false
+                        showEditDialog = false
+                        savedToast("Profile saved ✓ — dates and finance figures updated.")
+                        }
+                    }
                 }) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { showEditDialog = false }) { Text("Cancel") } }
@@ -213,6 +257,7 @@ fun UniversityScreen(viewModel: FinanceViewModel) {
                             (universityProfile ?: UniversityProfile()).copy(startingFunding = amt)
                         )
                         showAllowanceDialog = false
+                        savedToast("Starting funds set to KSh ${amt.toInt()} ✓")
                     }
                 }) { Text("Save") }
             },
@@ -256,6 +301,8 @@ fun UniversityScreen(viewModel: FinanceViewModel) {
 fun UniversityProfileCard(
     universityName: String,
     campus: String,
+    programme: String,
+    yearOfStudy: String,
     currentSemester: Int,
     academicYear: String,
     startingFunding: Double
@@ -271,6 +318,8 @@ fun UniversityProfileCard(
 
             UniversityInfoRow(label = "University", value = universityName)
             UniversityInfoRow(label = "Campus", value = campus)
+            if (programme.isNotBlank()) UniversityInfoRow(label = "Programme", value = programme)
+            if (yearOfStudy.isNotBlank()) UniversityInfoRow(label = "Year of Study", value = yearOfStudy)
             UniversityInfoRow(label = "Semester", value = "$currentSemester")
             UniversityInfoRow(label = "Academic Year", value = academicYear)
             UniversityInfoRow(label = "Starting Funding", value = "KSh ${startingFunding.toInt()}")
@@ -306,36 +355,66 @@ fun UniversityInfoRow(label: String, value: String, color: Color = Color.Unspeci
     Spacer(modifier = Modifier.height(4.dp))
 }
 
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun TimestampPickerField(
+    label: String,
+    timestamp: Long,
+    onSelected: (Long) -> Unit
+) {
+    var showPicker by remember { mutableStateOf(false) }
+    val pickerState = rememberDatePickerState(initialSelectedDateMillis = timestamp.takeIf { it > 0L })
+    val display = if (timestamp > 0L) {
+        java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
+            .format(java.util.Date(timestamp))
+    } else {
+        "Not set"
+    }
+    OutlinedButton(onClick = { showPicker = true }, modifier = Modifier.fillMaxWidth()) {
+        Text("$label: $display")
+    }
+    if (showPicker) {
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(
+                    enabled = pickerState.selectedDateMillis != null,
+                    onClick = {
+                        pickerState.selectedDateMillis?.let(onSelected)
+                        showPicker = false
+                    }
+                ) { Text("Set date") }
+            },
+            dismissButton = { TextButton(onClick = { showPicker = false }) { Text("Cancel") } }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+}
+
 
 @Composable
 fun UniversityFinancialPlanner(
     profile: UniversityProfile?,
     transactions: List<Transaction>,
+    committed: Double,
     viewModel: FinanceViewModel
 ) {
-    val now = System.currentTimeMillis()
     val day = 24L * 60 * 60 * 1000
-    val funding = profile?.startingFunding ?: 0.0
-    val start = profile?.semesterStartTimestamp?.takeIf { it > 0 }
-        ?: transactions.minOfOrNull { it.dateTimestamp } ?: now
-    val end = profile?.semesterEndTimestamp?.takeIf { it > start } ?: (start + 120 * day)
-
-    val income = transactions
-        .filter { it.type == TransactionType.INCOME && !it.isSample && it.dateTimestamp >= start }
-        .sumOf { it.amount }
-    val spent = transactions
-        .filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= start }
-        .sumOf { it.amount }
-    val remaining = funding + income - spent
-    val daysElapsed = ((now - start) / day).coerceAtLeast(1)
-    val daysLeft = ((end - now) / day).coerceAtLeast(0)
-    val weeksLeft = (daysLeft / 7).toInt()
-    val pace = spent / daysElapsed
-    val weeklyAllowance = if (weeksLeft > 0) remaining / weeksLeft else remaining
-    val projected = (remaining - pace * daysLeft).toInt()
+    val now = System.currentTimeMillis()
+    val runway = profile?.let {
+        calculateSemesterRunway(
+            transactions = transactions,
+            startTimestamp = it.semesterStartTimestamp,
+            endTimestamp = it.semesterEndTimestamp,
+            startingFunding = it.startingFunding,
+            committed = committed,
+            now = now
+        )
+    }
 
 
-    if (funding <= 0 && income <= 0 && spent <= 0) {
+    if (runway == null) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -345,14 +424,14 @@ fun UniversityFinancialPlanner(
                 Text("Semester Financial Planner", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "Nothing to forecast yet.",
+                    "Semester dates needed",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "Set your allowance below and log a few transactions — this card becomes your live forecast: what's left, daily pace, weekly allowance, projected end.",
+                    "Set the actual semester start and end dates in your university profile. The forecast will use your ledger and unpaid commitments; it will not guess a 120-day term.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -360,7 +439,6 @@ fun UniversityFinancialPlanner(
         }
         return
     }
-    val ended = now >= end
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -370,31 +448,38 @@ fun UniversityFinancialPlanner(
                 Text("Semester Financial Planner", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "KSh ${remaining.toInt()}",
+                    MoneyFormatter.compact(Money.of(runway.availableAfterCommitments)),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
-                color = if (remaining < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                color = if (runway.availableAfterCommitments < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             )
             Text(
-                "remaining of KSh ${funding.toInt()} starting funds",
+                "available after KSh ${MoneyFormatter.compact(Money.of(runway.committed))} in bills, fees, debts and goals",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            UniversityInfoRow(label = "Semester income", value = "+ KSh ${income.toInt()}", color = MaterialTheme.colorScheme.primary)
-            UniversityInfoRow(label = "Spent so far", value = "− KSh ${spent.toInt()}", color = MaterialTheme.colorScheme.error)
-            UniversityInfoRow(label = "Daily pace", value = "KSh ${pace.toInt()}/day")
-            UniversityInfoRow(label = "Time left", value = if (weeksLeft > 0) "$weeksLeft weeks ($daysLeft days)" else "$daysLeft days")
+            UniversityInfoRow(label = "Opening funds", value = MoneyFormatter.compact(Money.of(runway.openingFunds)))
+            UniversityInfoRow(label = "Income since start", value = MoneyFormatter.compact(Money.of(runway.income)), color = MaterialTheme.colorScheme.primary)
+            UniversityInfoRow(label = "Outflows", value = MoneyFormatter.compact(Money.of(runway.outflows)), color = MaterialTheme.colorScheme.error)
+            UniversityInfoRow(label = "Remaining before commitments", value = MoneyFormatter.compact(Money.of(runway.remainingBeforeCommitments)))
+            UniversityInfoRow(label = "Daily outflow pace", value = MoneyFormatter.compact(Money.of(runway.dailyPace)) + "/day")
             UniversityInfoRow(
-                label = "Weekly allowance",
-                value = "KSh ${weeklyAllowance.toInt()}",
-                color = if (weeklyAllowance < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                label = "Time left",
+                value = if (runway.isUpcoming) "Starts in ${runway.daysUntilStart} days"
+                    else if (runway.isEnded) "Semester ended"
+                    else "${runway.daysRemaining} days"
             )
             UniversityInfoRow(
-                label = "Projected end",
-                value = "KSh $projected",
-                color = if (projected < 2000) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                label = "Weekly allowance",
+                value = MoneyFormatter.compact(Money.of(runway.weeklyAllowance)),
+                color = if (runway.weeklyAllowance < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+            )
+            UniversityInfoRow(
+                label = "Projected after commitments",
+                value = MoneyFormatter.compact(Money.of(runway.projectedEndAfterCommitments)),
+                color = if (runway.projectedEndAfterCommitments < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             )
             // Persona semester note: the same runway means different things.
             val semPersona = remember { com.pesaflow.app.ui.budgets.parsePersona(viewModel.getOnboardingAnswers()) }
@@ -411,8 +496,8 @@ fun UniversityFinancialPlanner(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(semNote, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             }
-            val healthTotal = (funding + income).coerceAtLeast(1.0)
-            val healthFrac = (remaining / healthTotal).toFloat().coerceIn(0f, 1f)
+            val healthTotal = (runway.openingFunds + runway.income).coerceAtLeast(1.0)
+            val healthFrac = (runway.availableAfterCommitments / healthTotal).toFloat().coerceIn(0f, 1f)
             Spacer(modifier = Modifier.height(12.dp))
             Text("Semester health " + (healthFrac * 100).toInt() + "%", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(4.dp))
@@ -420,7 +505,7 @@ fun UniversityFinancialPlanner(
                 progress = { healthFrac },
                 modifier = Modifier.fillMaxWidth().height(8.dp),
                 color = when {
-                    remaining < 0 || projected < 2000 -> MaterialTheme.colorScheme.error
+                    runway.availableAfterCommitments < 0 || runway.projectedEndAfterCommitments < 2000 -> MaterialTheme.colorScheme.error
                     healthFrac < 0.3f -> MaterialTheme.colorScheme.tertiary
                     else -> MaterialTheme.colorScheme.primary
                 },
@@ -450,16 +535,17 @@ fun UniversityFinancialPlanner(
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 when {
-                    ended -> "Semester window ended with KSh ${remaining.toInt()} left. Start a new semester from Edit Profile. 🏁"
-                    remaining < 0 -> "⚠️ You're past zero — log income or cut spending immediately."
-                    projected < 2000 -> "⚠️ At this pace you'll end near KSh $projected. Slow spending or add income."
-                    else -> "On track 👌 — projected KSh $projected at semester end if pace holds."
+                    runway.isUpcoming -> "Term not started — this forecast includes the opening funds and recorded commitments."
+                    runway.isEnded -> "Semester window ended. Set the dates for your next term to start a new forecast. 🏁"
+                    runway.availableAfterCommitments < 0 -> "⚠️ Recorded commitments exceed the semester money available."
+                    runway.projectedEndAfterCommitments < 2000 -> "⚠️ At this outflow pace the projected amount after commitments is ${MoneyFormatter.compact(Money.of(runway.projectedEndAfterCommitments))}."
+                    else -> "Projection uses your recorded ledger pace; future unconfirmed income is not included."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
-                color = if (remaining < 0 || projected < 2000) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                color = if (runway.availableAfterCommitments < 0 || runway.projectedEndAfterCommitments < 2000) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             )
-            if (!ended && (remaining < 0 || projected < 2000)) {
+            if (!runway.isEnded && !runway.isUpcoming && (runway.availableAfterCommitments < 0 || runway.projectedEndAfterCommitments < 2000)) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("Broke-week essentials 🛟", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))

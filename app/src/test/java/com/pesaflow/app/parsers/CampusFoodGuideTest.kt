@@ -1,5 +1,8 @@
 package com.pesaflow.app.parsers
 
+import com.pesaflow.app.data.meals.MealTier
+import com.pesaflow.app.data.meals.mealTier
+import com.pesaflow.app.data.meals.mealTierLabel
 import com.pesaflow.app.data.meals.rentHintFor
 import com.pesaflow.app.data.meals.spotsFor
 import org.junit.Assert.*
@@ -83,5 +86,16 @@ class CampusFoodGuideTest {
         assertTrue(strath!!.contains("13-50k"))
         assertNull(rentHintFor("Oxford"))
         assertNull(rentHintFor(""))
+    }
+
+    @Test
+    fun `daily allowance maps to comfort balanced stretch tiers`() {
+        assertEquals(MealTier.COMFORT, mealTier(500.0))
+        assertEquals(MealTier.COMFORT, mealTier(400.0))
+        assertEquals(MealTier.BALANCED, mealTier(399.0))
+        assertEquals(MealTier.BALANCED, mealTier(150.0))
+        assertEquals(MealTier.STRETCH, mealTier(149.0))
+        assertEquals(MealTier.STRETCH, mealTier(0.0))
+        assertTrue(mealTierLabel(MealTier.STRETCH).isNotBlank())
     }
 }

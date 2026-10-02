@@ -54,6 +54,41 @@ class FinanceRepository(private val database: AppDatabase) {
     suspend fun saveFinancialProfile(profile: FinancialProfile) =
         database.financialProfileDao().save(profile)
 
+
+    // Phase 8 user context: fact graph with provenance. Writes merge (never
+    // clobber user truth with inference) and invalidate dependents on change.
+    fun userContext(): Flow<List<com.pesaflow.app.data.context.ContextFact>> =
+        database.userContextDao().getAll()
+
+    suspend fun setContextFact(fact: com.pesaflow.app.data.context.ContextFact) {
+        val dao = database.userContextDao()
+        val existing = dao.get(fact.key)
+        val merged = com.pesaflow.app.data.context.mergeFact(existing, fact)
+            ?: return
+        if (existing != null && existing.value != merged.value) {
+            com.pesaflow.app.data.context.invalidationKeys(fact.key)
+                .forEach { dao.delete(it) }
+        }
+        dao.upsert(merged)
+    }
+
+    suspend fun deleteContextFact(key: String) =
+        database.userContextDao().delete(key)
+
+    suspend fun clearUserContext() =
+        database.userContextDao().deleteAll()
+
+
+    // Phase 8 places catalogue: user-entered local knowledge.
+    fun places(): Flow<List<com.pesaflow.app.data.places.Place>> =
+        database.placeDao().getAll()
+
+    suspend fun upsertPlace(place: com.pesaflow.app.data.places.Place) =
+        database.placeDao().upsert(place)
+
+    suspend fun deletePlace(id: String) =
+        database.placeDao().delete(id)
+
     suspend fun migrateLegacyIncomeSources(context: android.content.Context) {
         val moved = com.pesaflow.app.data.income.IncomeSourceStore.consumeLegacy(context)
         if (moved.isNotEmpty()) {
@@ -367,11 +402,20 @@ class FinanceRepository(private val database: AppDatabase) {
     suspend fun deleteBill(id: String) = database.billDao().deleteBill(id)
 
 
-    suspend fun updateBillAmount(id: String, amount: Double, dueDate: Long, category: String, frequency: String, reminder: Boolean, leadDays: Int) =
-        database.billDao().updateBill(id, amount, dueDate, category, frequency, reminder, leadDays)
+    suspend fun updateBillAmount(id: String, amount: Double, dueDate: Long, category: String, frequency: String, reminder: Boolean, leadDays: Int, paidBy: String) =
+        database.billDao().updateBill(id, amount, dueDate, category, frequency, reminder, leadDays, paidBy)
 
 
     suspend fun markBillPaid(id: String) = database.billDao().markBillPaid(id)
+
+
+    // Auto-fulfillment link: an already-confirmed ledger row settles the bill
+    // (reopen keeps the user's row — only auto-created "billpay:" rows void).
+    suspend fun linkBillPayment(id: String, paymentId: String) =
+        database.billDao().markBillPaidWith(id, paymentId, 0.0)
+
+    suspend fun updateBillPaybill(id: String, paybill: String) =
+        database.billDao().updateBillPaybill(id, paybill.trim())
 
 
     // Phase 5 bill accounting: a bill becomes an expense only through a real

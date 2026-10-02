@@ -92,6 +92,50 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch { repository.saveFinancialProfile(profile) }
     }
 
+    // Phase 8 context facts: explicit, provenance-stamped, user-editable.
+    fun setContextFact(fact: com.pesaflow.app.data.context.ContextFact) {
+        viewModelScope.launch { repository.setContextFact(fact) }
+    }
+
+    fun deleteContextFact(key: String) {
+        viewModelScope.launch { repository.deleteContextFact(key) }
+    }
+
+    fun clearUserContext() {
+        viewModelScope.launch { repository.clearUserContext() }
+    }
+
+    // Phase 8 places catalogue: user-reported spots beat bundled packs
+    // everywhere prices show. Stored locally; shared only via Online opt-in.
+    val places: StateFlow<List<com.pesaflow.app.data.places.Place>> = repository.places().stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    fun addPlace(name: String, area: String, price: Double, kind: String = "FOOD_OUTLET") {
+        val clean = name.trim()
+        if (clean.isEmpty() || price <= 0) return
+        viewModelScope.launch {
+            repository.upsertPlace(
+                com.pesaflow.app.data.places.Place(
+                    name = clean,
+                    kind = kind.ifBlank { "FOOD_OUTLET" },
+                    area = area.trim(),
+                    priceMin = price,
+                    priceMax = price,
+                    source = "USER_ENTERED"
+                )
+            )
+        }
+    }
+
+    fun deletePlace(id: String) {
+        viewModelScope.launch { repository.deletePlace(id) }
+    }
+
+    val userContextFacts: StateFlow<Map<String, String>> = repository.userContext()
+        .map { list -> list.associate { it.key to it.value } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     // Canonical snapshot (Phase 2): every screen will read money figures
     // from here instead of re-deriving them (UI rewire lands Phase 11).
     // Pure buildSnapshot over combined flows — the ViewModel orchestrates
@@ -195,30 +239,33 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 
-    private fun signedAmount(tx: Transaction): Double = when (tx.type) {
-        TransactionType.INCOME -> tx.amount
-        TransactionType.EXPENSE -> -tx.amount
-        TransactionType.SAVING -> -tx.amount
-        TransactionType.INVESTMENT -> -tx.amount
-        TransactionType.TRANSFER -> 0.0
-    }
-
-
-    // Per-method balances: the pooled number hides which pocket holds the
-    // money. M-Pesa wallet vs cash in hand vs bank, samples excluded.
+    // Per-pocket balances: the pooled number hides which pocket holds the
+    // money. M-Pesa wallet vs cash in hand vs bank, samples excluded, paired
+    // transfer legs counted per side (a bank move used to vanish from every
+    // pocket). Same helper the tests pin — one rule, both places.
     val mpesaBalance: StateFlow<Double> = allTransactions.map { txs ->
-        txs.filter { !it.isSample && it.paymentMethod == PaymentMethod.MPESA }.sumOf { signedAmount(it) }
+        com.pesaflow.app.data.money.pocketBalance(txs, PaymentMethod.MPESA)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 
     val cashBalance: StateFlow<Double> = allTransactions.map { txs ->
-        txs.filter { !it.isSample && it.paymentMethod == PaymentMethod.CASH }.sumOf { signedAmount(it) }
+        com.pesaflow.app.data.money.pocketBalance(txs, PaymentMethod.CASH)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 
     val bankBalance: StateFlow<Double> = allTransactions.map { txs ->
-        txs.filter { !it.isSample && it.paymentMethod == PaymentMethod.BANK_TRANSFER }.sumOf { signedAmount(it) }
+        com.pesaflow.app.data.money.pocketBalance(txs, PaymentMethod.BANK_TRANSFER)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+
+    // 1-tap drift reconcile: books the ledger-vs-SMS gap as a labeled M-Pesa
+    // adjustment so the next drift check reads zero. UI confirms first; the
+    // math (direction, threshold) lives in reconcileEntry, unit-tested.
+    fun reconcileWallet(smsBalance: Double) {
+        val entry = com.pesaflow.app.data.money.reconcileEntry(mpesaBalance.value, smsBalance)
+            ?: return
+        viewModelScope.launch { repository.insertTransaction(entry) }
+    }
 
 
     // Last wallet balance harvested from SMS ("New M-PESA balance is KSh X").
@@ -228,8 +275,11 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
 
+    // Earned income only: onboarding opening rows (pocket + upkeep) are held
+    // cash, never monthly earnings — counting them here inflated "this month"
+    // every onboarding month.
     val monthlyIncome: StateFlow<Double> = allTransactions.map { txs ->
-        txs.filter { it.type == TransactionType.INCOME && !it.isSample && isCurrentMonth(it.dateTimestamp) }.sumOf { it.amount}
+        txs.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening && isCurrentMonth(it.dateTimestamp) }.sumOf { it.amount}
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 
@@ -336,7 +386,21 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             // Approvals are corrections too — teach the engine.
             CategoryMemory.learn(prefs(), tx.merchant, category)
             com.pesaflow.app.data.ledger.ConfidenceMemory.record(prefs(), pending.merchant, true)
+            autoLinkBills(listOf(tx))
         }
+    }
+
+
+    // Auto-fulfillment on approve: just-confirmed rows scoring ≥0.85 against
+    // an open bill link immediately (the Bills card suggests the rest).
+    // Silent when nothing is sure — guesses never eat rows.
+    private suspend fun autoLinkBills(newTxs: List<Transaction>) {
+        if (newTxs.isEmpty()) return
+        val open = repository.allBills.first()
+        if (open.none { it.status != "PAID" }) return
+        com.pesaflow.app.data.finance.matchBillPayments(open, newTxs)
+            .filter { it.score >= 0.85 }
+            .forEach { repository.linkBillPayment(it.bill.id, it.tx.id) }
     }
 
 
@@ -358,16 +422,19 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     fun approveAllPending(rows: List<PendingTransaction>) {
         if (rows.isEmpty()) return
         viewModelScope.launch {
+            val fresh = mutableListOf<Transaction>()
             val done = repository.transact {
                 rows.map { p ->
                     val category = resolveApprovalCategory(p, p.category)
                     val tx = repository.approvePendingTransaction(p, category, p.type)
                     CategoryMemory.learn(prefs(), tx.merchant, category)
                     com.pesaflow.app.data.ledger.ConfidenceMemory.record(prefs(), p.merchant, true)
+                    fresh.add(tx)
                     Undoable.Approved(p, tx.id)
                 }
             }
             pushUndo(Undoable.ApprovedAll(done))
+            autoLinkBills(fresh)
         }
     }
 
@@ -646,13 +713,13 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }
 
 
-    fun addBill(name: String, amount: Double, dueDate: Long, category: String, frequency: String) {
+    fun addBill(name: String, amount: Double, dueDate: Long, category: String, frequency: String, paybill: String = "", paidBy: String = "ME") {
         viewModelScope.launch {
             repository.insertBill(
-                Bill(name = name, amount = amount, dueDate = dueDate, category = category, frequency = frequency, amountRemaining = amount)
+                Bill(name = name, amount = amount, dueDate = dueDate, category = category, frequency = frequency, amountRemaining = amount, paybill = paybill.trim(), paidBy = paidBy)
             )
             // Bills drive budgets: a recurring bill adjusts (never duplicates) its monthly budget
-            if (frequency != "ONE_TIME" && category.isNotBlank()) {
+            if (paidBy == "ME" && frequency != "ONE_TIME" && category.isNotBlank()) {
                 val existing = repository.budgets.first().firstOrNull {
                     it.type == BudgetType.MONTHLY && it.category.equals(category, ignoreCase = true)
                 }
@@ -679,10 +746,18 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch { repository.markBillPaid(id) }
     }
 
+    // Auto-fulfillment confirm: links the spotted ledger row to the bill so
+    // projections stop reserving it. Suggest-only upstream (matchBillPayments);
+    // the user taps, never the engine alone.
+    fun linkBillPayment(billId: String, txId: String) {
+        viewModelScope.launch { repository.linkBillPayment(billId, txId) }
+    }
 
-    fun updateBillDetails(bill: Bill, name: String, amount: Double, category: String, frequency: String) {
+
+    fun updateBillDetails(bill: Bill, name: String, amount: Double, category: String, frequency: String, paybill: String = "", paidBy: String = bill.paidBy) {
         viewModelScope.launch {
-            repository.updateBillAmount(bill.id, amount, bill.dueDate, category, frequency, bill.reminderEnabled, bill.reminderLeadDays)
+            repository.updateBillAmount(bill.id, amount, bill.dueDate, category, frequency, bill.reminderEnabled, bill.reminderLeadDays, paidBy)
+            if (paybill.trim() != bill.paybill) repository.updateBillPaybill(bill.id, paybill)
         }
     }
 

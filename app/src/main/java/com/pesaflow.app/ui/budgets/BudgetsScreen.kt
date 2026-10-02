@@ -2,6 +2,7 @@ package com.pesaflow.app.ui.budgets
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -75,7 +76,8 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
     // ranges, human labels — one definition for every budget surface.
     val (periodType, periodWindow, windowLabel) =
         com.pesaflow.app.data.finance.budgetTabWindow(tab, now)
-    val target = budgets.filter { it.type == periodType }.sumOf { it.limitAmount }
+    // ALL master wins over the category breakdown (never both summed).
+    val target = com.pesaflow.app.data.finance.masterOrCategoryTotal(budgets, periodType)
     val spent = transactions
         .filter {
             it.type == TransactionType.EXPENSE && !it.isSample &&
@@ -92,14 +94,17 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
     val lastWeekSpent = transactions
         .filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= prevWeekStart && it.dateTimestamp < periodWindow.startInclusive }
         .sumOf { it.amount }
+    // Rollover is informational only: last period's unspent already sits in
+    // the ledger balance. Baking it into the target doubled "total monthly
+    // budget" on fresh months (nothing spent last month → +100% phantom).
+    // The hero target is exactly what was set — nothing more.
     val carry = when (tab) {
         "Monthly" -> (target - lastSpent).coerceAtLeast(0.0)
         "Weekly" -> (target - lastWeekSpent).coerceAtLeast(0.0)
         else -> 0.0
     }
     val carryLabel = if (tab == "Weekly") "last week" else "last month"
-    val displayTarget = target + carry
-    val left = displayTarget - spent
+    val left = target - spent
 
     Box(Modifier.fillMaxSize()) {
         CinematicBackdrop(workspaceTint = TintBudgetsJar, bgRes = R.drawable.bg_budgets_jar)
@@ -224,7 +229,8 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                             Switch(checked = autoDaily, onCheckedChange = { autoDaily = it })
                         }
                     }
-                    val monthlyBudgetsTotal = budgets.filter { it.type == BudgetType.MONTHLY }.sumOf { it.limitAmount }
+                    // Same master-wins rule: daily auto = ALL ÷ 30, not (ALL + cats) ÷ 30.
+                    val monthlyBudgetsTotal = com.pesaflow.app.data.finance.masterOrCategoryTotal(budgets, BudgetType.MONTHLY)
                     // Expected income from More → Income (HELB, parents, hustle...) backs the
                     // base when the ledger is still empty early in the month.
                     val incomeSources by viewModel.incomeSources.collectAsState()
@@ -245,10 +251,11 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         val nowMs = System.currentTimeMillis()
-                        val openBills = allBills.filter { it.status != "PAID" }
-                        // Smart survival-first engine: real bills as floors + real 90-day avgs.
+                        val openBills = allBills.filter { it.status != "PAID" && it.paidBy == "ME" }
+                        // Reserve this month's share of each bill, using the
+                        // outstanding remainder rather than the original total.
                         val billMap = openBills.groupBy { it.category.lowercase() }
-                            .mapValues { e -> e.value.sumOf { it.amount }.toInt() }
+                            .mapValues { e -> e.value.sumOf { monthlyBillReserve(it, nowMs) } }
                         val avgMapLedger = transactions.filter {
                             it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= nowMs - 90L * 24 * 60 * 60 * 1000
                         }.groupBy { it.category.lowercase() }
@@ -302,6 +309,16 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        val plannedTotal = plan.suggestions.sumOf { it.amount }
+                        val periodBase = calcBase * periodScale(calcPeriod)
+                        if (plannedTotal > periodBase) {
+                            Text(
+                                "Funding gap: this plan exceeds the entered base by KSh ${(plannedTotal - periodBase).toInt()}. " +
+                                    "Treat the difference as unfunded, not spendable.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                         if (dropped.isNotEmpty()) {
                             Text(
                                 "Paused to protect Food + Rent: ${dropped.joinToString(", ")}",
@@ -393,7 +410,7 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                         }
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            BudgetRing(fraction = if (displayTarget > 0) (spent / displayTarget).toFloat() else 0f)
+                            BudgetRing(fraction = if (target > 0) (spent / target).toFloat() else 0f)
                             Spacer(modifier = Modifier.width(20.dp))
                             Column {
                                 Text(
@@ -403,13 +420,13 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                                     color = if (left < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    "left of KSh ${displayTarget.toInt()}",
+                                    "left of KSh ${target.toInt()}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 if (carry > 0) {
                                     Text(
-                                        "＋KSh ${carry.toInt()} rolled in from $carryLabel 🎲",
+                                        "＋KSh ${carry.toInt()} unspent from $carryLabel — already inside your balance 🎲",
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.primary
@@ -424,7 +441,11 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            periodVerdict(tab, spent, displayTarget),
+                            com.pesaflow.app.data.finance.periodVerdict(
+                                tab, spent, target,
+                                java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH),
+                                java.util.Calendar.getInstance().getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
                             color = if (spent > target) com.pesaflow.app.ui.theme.ppColors.error else com.pesaflow.app.ui.theme.ppColors.gold
@@ -442,23 +463,28 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                     // back to rolling 120d without a profile window).
                     val nowMs = System.currentTimeMillis()
                     val win = com.pesaflow.app.data.finance.budgetWindowRange(budget.type, nowMs)
-                    val cSpent = transactions
-                        .filter {
-                            it.type == TransactionType.EXPENSE && !it.isSample &&
-                                it.dateTimestamp in win && it.dateTimestamp <= nowMs &&
-                                it.category.equals(budget.category, ignoreCase = true)
-                        }
-                        .sumOf { it.amount }
+                    val cSpent = com.pesaflow.app.data.finance.envelopeSpend(transactions, budget.category, win, nowMs)
                     val cLeft = (budget.limitAmount - cSpent).coerceAtLeast(0.0)
                     val cPct = (cSpent / budget.limitAmount * 100).coerceIn(0.0, 100.0)
                     com.pesaflow.app.ui.theme.PpCard(kind = com.pesaflow.app.ui.theme.PpCardKind.STANDARD) {
                         Column(verticalArrangement = Arrangement.spacedBy(com.pesaflow.app.ui.theme.ppSpacing.sm)) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            "${com.pesaflow.app.ui.theme.categoryEmoji(budget.category)} ${budget.category}",
-                                            style = com.pesaflow.app.ui.theme.ppTypography.labelLarge,
-                                            color = com.pesaflow.app.ui.theme.ppColors.textPrimary
-                                        )
+                                        androidx.compose.foundation.layout.Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            androidx.compose.foundation.layout.Box(
+                                                modifier = Modifier.size(10.dp)
+                                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                                    .background(com.pesaflow.app.ui.theme.categoryChartColor(budget.category))
+                                            )
+                                            Text(
+                                                "${com.pesaflow.app.ui.theme.categoryEmoji(budget.category)} ${budget.category}",
+                                                style = com.pesaflow.app.ui.theme.ppTypography.labelLarge,
+                                                color = com.pesaflow.app.ui.theme.ppColors.textPrimary
+                                            )
+                                        }
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             TextButton(onClick = {
                                                 watched = com.pesaflow.app.data.ledger.Watchlist.toggle(watchPrefs, budget.category)
@@ -689,7 +715,6 @@ private fun dayStartOf(now: Long): Long {
     return c.timeInMillis
 }
 
-
 private fun monthStartOf(now: Long): Long {
     val c = java.util.Calendar.getInstance().apply { timeInMillis = now }
     c.set(java.util.Calendar.DAY_OF_MONTH, 1)
@@ -698,15 +723,4 @@ private fun monthStartOf(now: Long): Long {
     c.set(java.util.Calendar.SECOND, 0)
     c.set(java.util.Calendar.MILLISECOND, 0)
     return c.timeInMillis
-}
-
-
-private fun periodVerdict(tab: String, spent: Double, target: Double): String {
-    if (target <= 0) return ""
-    val pct = (spent / target * 100).toInt()
-    return when {
-        spent > target -> "Over $tab budget by KSh ${(spent - target).toInt()} ($pct%) — essentials only. 🛑"
-        pct >= 80 -> "$pct% used — KSh ${(target - spent).toInt()} left. Slow down. ⚠️"
-        else -> "$pct% used — KSh ${(target - spent).toInt()} left. On track 👌."
-    }
 }

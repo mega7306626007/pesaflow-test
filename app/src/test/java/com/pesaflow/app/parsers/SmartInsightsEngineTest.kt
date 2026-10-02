@@ -47,6 +47,25 @@ class SmartInsightsEngineTest {
     )
 
     @Test
+    fun `opening equity never trips the overspend alarm`() {
+        // Onboarding month: pocket 1000 seeded as an opening row, then 5000
+        // spent. Opening is held cash, not earnings — judging pace against
+        // zero earned income must stay silent, not scream "Danger".
+        val opening = txAt(1000.0, TransactionType.INCOME, "Income", System.currentTimeMillis()).copy(
+            merchant = "Opening balance",
+            isOpening = true
+        )
+        val txs = listOf(
+            opening,
+            tx(2000.0, TransactionType.EXPENSE, "Food"),
+            tx(2000.0, TransactionType.EXPENSE, "Transport"),
+            tx(1000.0, TransactionType.EXPENSE, "Airtime")
+        )
+        val out = buildInsights(txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList())
+        assertTrue(out.none { it.contains("Danger") })
+    }
+
+    @Test
     fun `dust baseline gets absolutes never fantasy percents`() {
         val txs = listOf(
             txAt(5000.0, TransactionType.EXPENSE, "Food", monthTs(0, 5)),
@@ -168,12 +187,18 @@ class SmartInsightsEngineTest {
             c.set(java.util.Calendar.SECOND, 0)
             c.set(java.util.Calendar.MILLISECOND, 0)
             tx(c.timeInMillis, TransactionType.EXPENSE, "Transport")
-        }
+        } +
+            // One spend stamped now: guarantees current-month spend so the
+            // engine gets past the empty-month early return even on the 1st,
+            // when all past Mondays fall in the previous month.
+            tx(200.0, TransactionType.EXPENSE, "Transport")
         val out = buildInsights(
             txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList(),
-            weekPlan = mapOf("Sat" to setOf("morning"))
+            // Both declared: whatever weekday today is, at least one stays
+            // stale (Sundays are excluded from stale detection by the engine).
+            weekPlan = mapOf("Sat" to setOf("morning"), "Fri" to setOf("morning"))
         )
-        assertTrue(out.any { it.contains("Timetable check") && it.contains("Sat") })
+        assertTrue(out.any { it.contains("Timetable check") && (it.contains("Sat") || it.contains("Fri")) })
     }
 
     @Test

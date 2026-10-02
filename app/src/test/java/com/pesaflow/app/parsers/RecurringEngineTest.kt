@@ -26,6 +26,17 @@ class RecurringEngineTest {
     }
 
     @Test
+    fun `opening rows never predict paydays`() {
+        // Two same-merchant opening rows 30d apart (re-onboarding residue):
+        // equity is not a salary rhythm.
+        val txs = listOf(
+            Transaction(amount = 5000.0, type = TransactionType.INCOME, category = "Income", dateTimestamp = day(60), merchant = "Opening balance", isOpening = true),
+            Transaction(amount = 5000.0, type = TransactionType.INCOME, category = "Income", dateTimestamp = day(30), merchant = "Opening balance", isOpening = true)
+        )
+        assertTrue(predictPaydays(txs, now).isEmpty())
+    }
+
+    @Test
     fun `fewOccurrencesBelowThreshold`() {
         val txs = listOf(tx(1500.0, "Netflix", now), tx(1500.0, "Netflix", now - 30L * 86400000))
         val patterns = detectRecurring(txs, minOccurrences = 3)

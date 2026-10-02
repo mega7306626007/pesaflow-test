@@ -14,6 +14,7 @@ import com.pesaflow.app.data.notifications.ReminderScheduler
 import com.pesaflow.app.data.parsers.MpesaParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -21,12 +22,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pesaflow.app.data.models.AppLanguage
@@ -78,12 +81,22 @@ fun SettingsScreen(viewModel: FinanceViewModel) {
     }
     val inboxScope = rememberCoroutineScope()
     var inboxResult by remember { mutableStateOf<String?>(null) }
-    var scanRange by remember { mutableStateOf("All") }
+    var inboxScanning by remember { mutableStateOf(false) }
+    var scanRange by remember { mutableStateOf("5 months") }
+    var customScanDays by remember {
+        mutableStateOf(prefs.getInt("sms_scan_custom_days", 150).toString())
+    }
     fun scanInbox(range: String = scanRange) {
+        val customDays = customScanDays.toIntOrNull()
+        if (range == "Custom" && (customDays == null || customDays !in 1..3650)) {
+            inboxResult = "Enter a custom lookback between 1 and 3,650 days."
+            return
+        }
+        inboxScanning = true
         inboxScope.launch(Dispatchers.IO) {
             try {
-                // Time scope: Today / Week / Month start at local midnight,
-                // month start, or 0 (everything).
+                // Presets use calendar boundaries; Custom accepts any lookback
+                // up to ten years. All preserves the full-inbox option.
                 val now = System.currentTimeMillis()
                 val day = 24L * 60 * 60 * 1000
                 val dayStart = java.util.Calendar.getInstance().apply {
@@ -104,6 +117,11 @@ fun SettingsScreen(viewModel: FinanceViewModel) {
                         set(java.util.Calendar.SECOND, 0)
                         set(java.util.Calendar.MILLISECOND, 0)
                     }.timeInMillis
+                    "5 months" -> java.util.Calendar.getInstance().apply {
+                        timeInMillis = now
+                        add(java.util.Calendar.MONTH, -5)
+                    }.timeInMillis
+                    "Custom" -> (now - customDays!!.toLong() * 24L * 60 * 60 * 1000)
                     else -> 0L
                 }
                 var found = 0
@@ -111,65 +129,87 @@ fun SettingsScreen(viewModel: FinanceViewModel) {
                 var dupes = 0
                 var unreadable = 0
                 var ads = 0
+                var capped = false
                 var newestBal: Double? = null
                 val samples = mutableListOf<String>()
                 val badSenders = mutableMapOf<String, Int>()
-                val selection = if (rangeStart > 0) {
-                    "(address LIKE ? OR address LIKE ? OR body LIKE ?) AND date >= ?"
-                } else {
-                    "address LIKE ? OR address LIKE ? OR body LIKE ?"
-                }
-                val args = if (rangeStart > 0) {
-                    arrayOf("%MPESA%", "%Safaricom%", "%M-PESA%", rangeStart.toString())
-                } else {
-                    arrayOf("%MPESA%", "%Safaricom%", "%M-PESA%")
-                }
-                context.contentResolver.query(
-                    android.provider.Telephony.Sms.Inbox.CONTENT_URI,
-                    arrayOf("_id", "address", "body", "date"),
-                    selection,
-                    args,
-                    "date DESC LIMIT 500"
-                )?.use { c ->
-                    val bodyIdx = c.getColumnIndexOrThrow("body")
-                    val addrIdx = c.getColumnIndexOrThrow("address")
-                    while (c.moveToNext()) {
-                        found++
-                        val body = c.getString(bodyIdx) ?: ""
-                        val sender = c.getString(addrIdx) ?: "?"
-                        // Newest-first order: first balance tail found is the latest wallet figure.
-                        if (newestBal == null) com.pesaflow.app.data.parsers.parseBalance(body)?.let { newestBal = it }
-                        val pending = MpesaParser.parseMessage(body)
-                        if (pending == null) {
-                            if (MpesaParser.isPromoAd(body)) {
-                                ads++
-                            } else {
-                                unreadable++
-                                badSenders[sender] = (badSenders[sender] ?: 0) + 1
-                                // Keep the first 3 failures (sender + opening words) so the
-                                // exact format can be taught to the parser next update.
-                                if (samples.size < 3) {
-                                    val head = body.replace("\n", " ").trim().take(90)
-                                    samples.add("$sender: $head")
-                                }
+                val sourceFilter = "(address LIKE ? OR address LIKE ? OR address LIKE ? OR address LIKE ? OR " +
+                    "address LIKE ? OR address LIKE ? OR address LIKE ? OR body LIKE ? OR body LIKE ?)"
+                val sourceArgs = arrayOf(
+                    "%MPESA%", "%Safaricom%", "%AIRTEL%", "%TELKOM%", "%EQUITEL%",
+                    "%HELB%", "%SACCO%", "%M-PESA%", "%KES%"
+                )
+                val selection = if (rangeStart > 0) "$sourceFilter AND date >= ?" else sourceFilter
+                val args = if (rangeStart > 0) sourceArgs + rangeStart.toString() else sourceArgs
+                val pageSize = 250
+                val maxRows = 5000
+                var offset = 0
+                var exhausted = false
+                while (!exhausted && !capped) {
+                    // Fetch one extra row at the limit so exactly 5,000 rows
+                    // are not mislabeled as truncated.
+                    val requested = minOf(pageSize, maxRows + 1 - offset)
+                    var pageRows = 0
+                    context.contentResolver.query(
+                        android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                        arrayOf("_id", "address", "body", "date"),
+                        selection,
+                        args,
+                        "date DESC LIMIT $requested OFFSET $offset"
+                    )?.use { c ->
+                        val bodyIdx = c.getColumnIndexOrThrow("body")
+                        val addrIdx = c.getColumnIndexOrThrow("address")
+                        val dateIdx = c.getColumnIndexOrThrow("date")
+                        while (c.moveToNext()) {
+                            pageRows++
+                            if (offset + pageRows > maxRows) {
+                                capped = true
+                                break
                             }
-                        } else if (viewModel.tryQueuePending(pending)) {
-                            queued++
-                        } else {
-                            dupes++
+                            val body = c.getString(bodyIdx) ?: ""
+                            val sender = c.getString(addrIdx) ?: ""
+                            // Body text can mention M-Pesa; never parse a
+                            // friend's message as an official transaction.
+                            if (sender.isNotBlank() && !MpesaParser.isOfficialSender(sender)) continue
+                            found++
+                            val smsTimestamp = c.getLong(dateIdx).takeIf { it > 0L } ?: now
+                            // Newest-first order: first balance tail found is the latest wallet figure.
+                            if (newestBal == null) com.pesaflow.app.data.parsers.parseBalance(body)?.let { newestBal = it }
+                            val pending = MpesaParser.parseMessage(body, sender, smsTimestamp)
+                            if (pending == null) {
+                                if (MpesaParser.isPromoAd(body)) {
+                                    ads++
+                                } else {
+                                    unreadable++
+                                    badSenders[sender] = (badSenders[sender] ?: 0) + 1
+                                    // Keep the first 3 failures (sender + opening words) so the
+                                    // exact format can be taught to the parser next update.
+                                    if (samples.size < 3) {
+                                        val head = body.replace("\n", " ").trim().take(90)
+                                        samples.add("$sender: $head")
+                                    }
+                                }
+                            } else if (viewModel.tryQueuePending(pending)) {
+                                queued++
+                            } else {
+                                dupes++
+                            }
                         }
                     }
+                    offset += pageRows
+                    if (pageRows < requested || offset > maxRows) exhausted = true
                 }
                 // Wallet display: newest balance tail seen in this scan.
                 newestBal?.let { com.pesaflow.app.data.parsers.saveMpesaBalance(context, it) }
                 val scopeLabel = if (range == "All") "" else " ($range)"
-                inboxResult = if (found == 0) {
+                val scanSummary = if (found == 0) {
                     "No M-Pesa/Safaricom texts found$scopeLabel — nothing to parse."
                 } else {
                     buildString {
-                        append("Scanned $found text(s)$scopeLabel: $queued new pending — approve them on Home. ✅")
+                        append("Scanned ${if (capped) "at least " else ""}$found official text(s)$scopeLabel: $queued new pending — approve them on Home. ✅")
                         if (ads > 0) append(" $ads promo text(s) skipped (ads, not money).")
                         if (dupes > 0) append(" $dupes already in your ledger (skipped, no doubles).")
+                        if (capped) append(" Scan cap reached; choose a shorter date window to continue.")
                         if (unreadable > 0) {
                             append(" $unreadable I can't read yet")
                             val topSenders = badSenders.entries.sortedByDescending { it.value }.take(2)
@@ -181,10 +221,13 @@ fun SettingsScreen(viewModel: FinanceViewModel) {
                         }
                     }
                 }
+                withContext(Dispatchers.Main) { inboxResult = scanSummary }
             } catch (e: SecurityException) {
-                inboxResult = "SMS permission needed — tap Enable first."
+                withContext(Dispatchers.Main) { inboxResult = "SMS permission needed — tap Enable first." }
             } catch (e: Exception) {
-                inboxResult = "Scan failed: ${e.message}"
+                withContext(Dispatchers.Main) { inboxResult = "Scan failed: ${e.message}" }
+            } finally {
+                withContext(Dispatchers.Main) { inboxScanning = false }
             }
         }
     }
@@ -621,14 +664,34 @@ fun SettingsScreen(viewModel: FinanceViewModel) {
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("Today", "Week", "Month", "All").forEach { r ->
+                            listOf("Today", "Week", "Month").forEach { r ->
                                 FilterChip(selected = scanRange == r, onClick = { scanRange = r }, label = { Text(r) })
                             }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("5 months", "Custom", "All").forEach { r ->
+                                FilterChip(selected = scanRange == r, onClick = { scanRange = r }, label = { Text(r) })
+                            }
+                        }
+                        if (scanRange == "Custom") {
+                            OutlinedTextField(
+                                value = customScanDays,
+                                onValueChange = {
+                                    customScanDays = it.filter { ch -> ch in '0'..'9' }.take(4)
+                                    prefs.edit().putInt("sms_scan_custom_days", customScanDays.toIntOrNull() ?: 150).apply()
+                                },
+                                label = { Text("Look back (days, 1–3,650)") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Scan SMS inbox now", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { scanInbox(scanRange) }) { Text("Scan $scanRange") }
+                            TextButton(onClick = { scanInbox(scanRange) }, enabled = !inboxScanning) {
+                                Text(if (inboxScanning) "Scanning…" else "Scan $scanRange")
+                            }
                         }
                         inboxResult?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -863,6 +926,7 @@ fun SettingsScreen(viewModel: FinanceViewModel) {
                             Button(
                                 onClick = {
                                     viewModel.purgeSamples { n ->
+                                        prefs.edit().putBoolean("demo_mode", false).apply()
                                         backupMsg = if (n == 0) "No sample data found. ✅" else "Cleared $n sample row(s). ✅"
                                     }
                                 },

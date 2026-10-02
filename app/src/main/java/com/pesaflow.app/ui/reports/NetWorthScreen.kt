@@ -40,15 +40,20 @@ fun NetWorthScreen(viewModel: FinanceViewModel) {
 
     val opening = profile?.startingFunding ?: 0.0
     val real = transactions.filter { !it.isSample }
-    val income = real.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
+    // Opening equity lives in exactly one place (see openingBasis): ledger
+    // opening rows when onboarding seeded them, else the profile funding.
+    // Counting both double-counted pocket money across screens.
+    val openingRows = real.filter { it.type == TransactionType.INCOME && it.isOpening }.sumOf { it.amount }
+    val income = real.filter { it.type == TransactionType.INCOME && !it.isOpening }.sumOf { it.amount }
     val spent = real.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
     val saved = real.filter { it.type == TransactionType.SAVING }.sumOf { it.amount }
     val invested = real.filter { it.type == TransactionType.INVESTMENT }.sumOf { it.amount }
+    val openingBasis = com.pesaflow.app.data.money.openingBasis(openingRows, opening)
     // Direction matters: money THEY owe me is an asset (+), money I owe is a
     // liability (−). Netting both as debt understated worth by 2× the lent sum.
     val iOwe = debts.filter { it.status != "PAID" && it.direction == "I_OWE" }.sumOf { it.amount }
     val theyOwe = debts.filter { it.status != "PAID" && it.direction != "I_OWE" }.sumOf { it.amount }
-    val cash = opening + income - spent - saved - invested
+    val cash = com.pesaflow.app.data.money.liquidCash(openingBasis, income, spent, saved, invested)
     val netWorth = cash + saved + invested + theyOwe - iOwe
     val scale = maxOf(kotlin.math.abs(cash), saved, invested, theyOwe, iOwe, 1.0)
 

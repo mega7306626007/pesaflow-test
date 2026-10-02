@@ -4,7 +4,9 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -32,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -88,6 +91,19 @@ fun DashboardScreen(
     val hideBalances by viewModel.hideBalances.collectAsState()
     val hiddenSections by viewModel.hiddenSections.collectAsState()
     val profile by viewModel.universityProfile.collectAsState()
+    val financialSnapshot by viewModel.financialSnapshot.collectAsState()
+    val semesterRunway = remember(transactions, profile, financialSnapshot.committed) {
+        profile?.let {
+            com.pesaflow.app.data.finance.calculateSemesterRunway(
+                transactions = transactions,
+                startTimestamp = it.semesterStartTimestamp,
+                endTimestamp = it.semesterEndTimestamp,
+                startingFunding = it.startingFunding,
+                committed = financialSnapshot.committed.toDouble(),
+                now = System.currentTimeMillis()
+            )
+        }
+    }
 
     // Weekday pattern defaults to THIS week — all-time is opt-in, never the
     // default. A 5000-SMS history must not masquerade as "this week".
@@ -124,6 +140,7 @@ fun DashboardScreen(
 
     var editingTx by remember { mutableStateOf<Transaction?>(null) }
     var showAllPending by remember { mutableStateOf(false) }
+    var showReconcile by remember { mutableStateOf(false) }
     // Unsure-first ordering for the pending queue (computed once per queue
     // change, reused by the list below).
     val orderPrefs = LocalContext.current.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
@@ -202,14 +219,17 @@ fun DashboardScreen(
                     com.pesaflow.app.data.finance.Horizon.WEEK -> "Safe to spend · this week"
                     com.pesaflow.app.data.finance.Horizon.UNTIL_NEXT_INCOME -> "Safe to spend · to next income"
                     com.pesaflow.app.data.finance.Horizon.MONTH -> "Safe to spend · this month"
-                    com.pesaflow.app.data.finance.Horizon.SEMESTER -> "Safe to spend · semester"
+                    com.pesaflow.app.data.finance.Horizon.SEMESTER ->
+                        if (semesterRunway == null) "Flexible after commitments" else "Available after commitments · term"
                 }
                 val heroValue = when (snap.primaryHorizon) {
                     com.pesaflow.app.data.finance.Horizon.TODAY -> snap.safeToday
                     com.pesaflow.app.data.finance.Horizon.WEEK -> snap.safeWeek
                     com.pesaflow.app.data.finance.Horizon.UNTIL_NEXT_INCOME -> snap.safeUntilIncome
                     com.pesaflow.app.data.finance.Horizon.MONTH -> snap.safeMonth
-                    com.pesaflow.app.data.finance.Horizon.SEMESTER -> snap.safeSemester
+                    com.pesaflow.app.data.finance.Horizon.SEMESTER ->
+                        semesterRunway?.availableAfterCommitments?.let(com.pesaflow.app.data.finance.Money::of)
+                            ?: snap.flexible
                 }
                 val fmt = com.pesaflow.app.data.finance.MoneyFormatter
                 val hour = remember { java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) }
@@ -311,6 +331,7 @@ fun DashboardScreen(
                                     SwipeToDismissBoxValue.EndToStart -> {
                                         viewModel.deleteTransactionWithUndo(tx)
                                         scope.launch {
+                                            snackbar.currentSnackbarData?.dismiss()
                                             val r = snackbar.showSnackbar("Deleted ${tx.merchant}.", "Undo", duration = SnackbarDuration.Long)
                                             if (r == SnackbarResult.ActionPerformed) viewModel.undoLast()
                                         }
@@ -397,7 +418,13 @@ fun DashboardScreen(
 
             // Forward projection: paydays + bills + subscriptions vs money held.
             item {
-                Next30DaysCard(transactions = transactions, bills = bills, hide = hideBalances)
+                val inflowSources by viewModel.incomeSources.collectAsState()
+                Next30DaysCard(
+                    transactions = transactions,
+                    bills = bills,
+                    hide = hideBalances,
+                    inflowDays = com.pesaflow.app.data.income.nextInflowDay(inflowSources)
+                )
             }
 
 
@@ -541,18 +568,80 @@ fun DashboardScreen(
                                 )
                             }
                         }
+                        // Spendable now: unconfirmed SMS rows are real money that
+                        // already moved, so the ledger understates reality until
+                        // they confirm. Shown only while the queue is non-empty.
+                        val pendingIn = pendingTransactions
+                            .filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
+                        val pendingOut = pendingTransactions
+                            .filter { it.type != TransactionType.INCOME }.sumOf { it.amount }
+                        if (!hideBalances && (pendingIn > 0 || pendingOut > 0)) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Spendable now: KSh ${com.pesaflow.app.data.money.spendableNow(availableBalance, pendingIn, pendingOut).toInt()} " +
+                                    "(ledger ± ${pendingTransactions.size} confirming)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         // Drift check: ledger's M-Pesa pocket vs the last SMS
-                        // reading. Non-zero means unlogged rows on one side.
+                        // reading, in tolerance zones. Small gaps get a gentle
+                        // nudge + the 1-tap fix; only large gaps go red. Minor
+                        // wobbles (fees, rounding) never stress the user.
                         wallet?.let { (wamt, _) ->
-                            val drift = mpesaBal - wamt
+                            val (zone, drift) =
+                                com.pesaflow.app.data.money.evaluateDrift(wamt, mpesaBal)
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 if (hideBalances) "Drift check: KSh ••••"
-                                else if (kotlin.math.abs(drift) < 1) "Drift check: ledger matches SMS ✓"
-                                else "Drift check: KSh ${drift.toInt()} " + (if (drift > 0) "(ledger higher — spending missing?)" else "(SMS higher — income missing?)"),
+                                else when (zone) {
+                                    com.pesaflow.app.data.money.DriftZone.IN_SYNC ->
+                                        "Drift check: ledger matches SMS ✓"
+                                    com.pesaflow.app.data.money.DriftZone.MINOR ->
+                                        "Drift check: KSh ${kotlin.math.abs(drift).toInt()} small gap — likely a fee or one unlogged row."
+                                    com.pesaflow.app.data.money.DriftZone.MAJOR ->
+                                        "Drift check: KSh ${kotlin.math.abs(drift).toInt()} " + (if (drift > 0) "(ledger higher — spending missing?)" else "(SMS higher — income missing?)")
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (kotlin.math.abs(drift) < 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                color = if (hideBalances) MaterialTheme.colorScheme.onSurfaceVariant
+                                else when (zone) {
+                                    com.pesaflow.app.data.money.DriftZone.IN_SYNC -> MaterialTheme.colorScheme.primary
+                                    com.pesaflow.app.data.money.DriftZone.MINOR -> com.pesaflow.app.ui.theme.ppColors.warning
+                                    com.pesaflow.app.data.money.DriftZone.MAJOR -> MaterialTheme.colorScheme.error
+                                }
+                            )
+                            if (!hideBalances && zone != com.pesaflow.app.data.money.DriftZone.IN_SYNC) {
+                                TextButton(onClick = { showReconcile = true }) {
+                                    Text("Reconcile KSh ${kotlin.math.abs(drift).toInt()} → ledger ⚖️")
+                                }
+                            }
+                        }
+                        if (showReconcile) {
+                            val wamt = com.pesaflow.app.data.parsers.readMpesaBalance(dashContext)?.first ?: 0.0
+                            val drift = mpesaBal - wamt
+                            AlertDialog(
+                                onDismissRequest = { showReconcile = false },
+                                title = { Text("Reconcile drift?") },
+                                text = {
+                                    Text(
+                                        "Ledger M-Pesa KSh ${mpesaBal.toInt()} vs SMS KSh ${wamt.toInt()}. " +
+                                            "Books KSh ${kotlin.math.abs(drift).toInt()} as “Balance adjustment” " +
+                                            (if (drift > 0) "(spending)." else "(income).")
+                                    )
+                                },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        viewModel.reconcileWallet(wamt)
+                                        showReconcile = false
+                                        scope.launch {
+                                            snackbar.currentSnackbarData?.dismiss()
+                                            snackbar.showSnackbar("Reconciled ✓", duration = SnackbarDuration.Short)
+                                        }
+                                    }) { Text("Book it") }
+                                },
+                                dismissButton = { TextButton(onClick = { showReconcile = false }) { Text("Cancel") } }
                             )
                         }
                     }
@@ -622,28 +711,41 @@ fun DashboardScreen(
             budgets.filter { it.type == BudgetType.MONTHLY && it.limitAmount > 0 }.mapNotNull { b ->
                 val nowMs = System.currentTimeMillis()
                 val win = com.pesaflow.app.data.time.monthRange(nowMs)
-                val spent = transactions
-                    .filter {
-                        it.type == TransactionType.EXPENSE && !it.isSample &&
-                            it.dateTimestamp in win && it.dateTimestamp <= nowMs
-                    }
-                    .sumOf { it.amount }
+                // Envelope-scoped: ALL reads everything, Food reads Food.
+                // Total-spend-against-every-envelope contradicted the Budgets
+                // tab ("Food crossed 3793 of 1200" next to a healthy card).
+                val spent = com.pesaflow.app.data.finance.envelopeSpend(transactions, b.category, win, nowMs)
                 val pct = (spent / b.limitAmount * 100).toInt()
                 if (pct >= 80) Triple(b, spent, pct) else null
             }.take(2).forEach { (b, spent, pct) ->
+                // Pace tempers the klaxon: 85% on day 28 is a steady month
+                // (calm card), 85% on day 3 is hot (red card). Over cap always red.
+                val cal = java.util.Calendar.getInstance()
+                val pace = com.pesaflow.app.data.finance.evaluateCategoryPace(
+                    spent, b.limitAmount,
+                    cal.get(java.util.Calendar.DAY_OF_MONTH),
+                    cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+                )
+                val hot = pct >= 100 || pace == com.pesaflow.app.data.finance.BudgetPace.AT_RISK ||
+                    pace == com.pesaflow.app.data.finance.BudgetPace.EXCEEDED
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (hot) MaterialTheme.colorScheme.errorContainer
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
                     ) {
                         Text(
                             if (pct >= 100) "⛔ ${b.category} budget crossed: KSh ${spent.toInt()} of KSh ${b.limitAmount.toInt()}."
-                            else "⚠️ ${b.category} at $pct%: KSh ${spent.toInt()} of KSh ${b.limitAmount.toInt()}.",
+                            else if (hot) "⚠️ ${b.category} at $pct%: KSh ${spent.toInt()} of KSh ${b.limitAmount.toInt()} — ahead of pace."
+                            else "👌 ${b.category} at $pct%: KSh ${spent.toInt()} of KSh ${b.limitAmount.toInt()} — still within pace.",
                             modifier = Modifier.padding(16.dp),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onErrorContainer
+                            color = if (hot) MaterialTheme.colorScheme.onErrorContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -718,24 +820,43 @@ fun DashboardScreen(
                         // Semester runway
                         Text("Semester Runway 🛤️", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
-                        val p = profile
-                        val now = System.currentTimeMillis()
-                        val semStart = p?.semesterStartTimestamp?.takeIf { it > 0 } ?: 0L
-                        val semEnd = p?.semesterEndTimestamp?.takeIf { it > 0 } ?: 0L
-                        if (p != null && semStart > 0 && semEnd > now) {
-                            val daysLeft = ((semEnd - now) / (24 * 60 * 60 * 1000L)).coerceAtLeast(1)
-                            val startingFunding = p.startingFunding
-                            val semIncome = transactions.filter { it.type == TransactionType.INCOME && !it.isSample && it.dateTimestamp >= semStart }.sumOf { it.amount }
-                            val semSpent = transactions.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= semStart }.sumOf { it.amount }
-                            val remainingFunds = (startingFunding + semIncome - semSpent).coerceAtLeast(0.0)
-                            val safeDaily = remainingFunds / daysLeft
+                        val runway = semesterRunway
+                        if (runway != null) {
+                            val safeDaily = if (runway.daysRemaining > 0) {
+                                runway.availableAfterCommitments / runway.daysRemaining
+                            } else null
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-                                Text("Days left in semester: $daysLeft", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("Safe daily spend: KSh ${safeDaily.toInt()}/day", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                Text("Remaining funds: KSh ${remainingFunds.toInt()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    when {
+                                        runway.isUpcoming -> "Semester starts in ${runway.daysUntilStart} days"
+                                        runway.isEnded -> "Semester ended"
+                                        else -> "${runway.daysRemaining} days left in semester"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "After commitments: " + if (hideBalances) "••••" else
+                                        com.pesaflow.app.data.finance.MoneyFormatter.compact(
+                                            com.pesaflow.app.data.finance.Money.of(runway.availableAfterCommitments)
+                                        ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (runway.availableAfterCommitments < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (safeDaily != null) {
+                                    Text(
+                                        "Daily runway pace: " + if (hideBalances) "••••" else
+                                            com.pesaflow.app.data.finance.MoneyFormatter.compact(
+                                                com.pesaflow.app.data.finance.Money.of(safeDaily)
+                                            ) + "/day",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (safeDaily < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         } else {
-                            Text("Set your university profile under More → University to view semester runway.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Set the actual semester start and end dates under More → University to see your semester runway.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         // Motivational message
@@ -778,14 +899,23 @@ fun DashboardScreen(
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Pending (${pendingTransactions.size}) 🔔", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Scrollable actions: "Remove duplicates + Confirm all
+                        // sure (225) + View all" crushed into one row on narrow
+                        // screens, stretching button text off-screen.
+                        Row(
+                            modifier = Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             if (pendingTransactions.size >= 2) {
                                 TextButton(onClick = {
                                     scope.launch {
                                         val n = viewModel.removeDuplicatePending()
+                                        snackbar.currentSnackbarData?.dismiss()
                                         snackbar.showSnackbar(
                                             if (n == 0) "No duplicates — queue is clean."
-                                            else "$n duplicate${if (n == 1) "" else "s"} removed."
+                                            else "$n duplicate${if (n == 1) "" else "s"} removed.",
+                                            duration = SnackbarDuration.Short
                                         )
                                     }
                                 }) { Text("Remove duplicates") }
@@ -794,7 +924,8 @@ fun DashboardScreen(
                                 TextButton(onClick = {
                                     viewModel.approveAllPending(sureRows)
                                     scope.launch {
-                                        val r = snackbar.showSnackbar("${sureRows.size} confirmed — history vouched.", "Undo", withDismissAction = true, duration = SnackbarDuration.Long)
+                                        snackbar.currentSnackbarData?.dismiss()
+                                        val r = snackbar.showSnackbar("${sureRows.size} confirmed — history vouched.", "Undo", withDismissAction = true, duration = SnackbarDuration.Short)
                                         if (r == SnackbarResult.ActionPerformed) viewModel.undoLast()
                                     }
                                 }) { Text("Confirm all sure (${sureRows.size})") }
@@ -808,13 +939,20 @@ fun DashboardScreen(
                 // Unsure-first: rows needing human eyes float up; sure rows sink
                 // toward the one-tap bulk button instead of hogging top slots.
                 items(orderedPending.take(if (showAllPending) Int.MAX_VALUE else 3)) { pending ->
+                    // Pill taps dismiss the keyboard: typing a category then
+                    // tapping a suggestion left the keyboard shoving the card.
+                    val keyboard = LocalSoftwareKeyboardController.current
                     var editCat by remember(pending.id) { mutableStateOf(pending.category) }
                     // Type can be wrong at parse time (P2P-to-self, withdrawals) —
                     // fix it here instead of delete-and-retype.
                     var editType by remember(pending.id) { mutableStateOf(pending.type) }
+                    // Dismiss-first + Short: M3 Long lingers 10s and rapid
+                    // confirms queued 20s+ of banner over the bottom nav.
+                    // Undo stays available — just inside a 4s window.
                     fun snack(msg: String) {
                         scope.launch {
-                            val r = snackbar.showSnackbar(msg, "Undo", withDismissAction = true, duration = SnackbarDuration.Long)
+                            snackbar.currentSnackbarData?.dismiss()
+                            val r = snackbar.showSnackbar(msg, "Undo", withDismissAction = true, duration = SnackbarDuration.Short)
                             if (r == SnackbarResult.ActionPerformed) viewModel.undoLast()
                         }
                     }
@@ -857,21 +995,24 @@ fun DashboardScreen(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     quickPicks.forEach { c ->
-                                        FilterChip(selected = editCat == c, onClick = { editCat = c }, label = { Text(c) })
+                                        FilterChip(selected = editCat == c, onClick = { keyboard?.hide(); editCat = c }, label = { Text(c) })
                                     }
                                 }
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf(
-                                    TransactionType.EXPENSE to "Spent",
-                                    TransactionType.INCOME to "Received",
-                                    TransactionType.SAVING to "Saved",
-                                    TransactionType.TRANSFER to "Moved"
-                                ).forEach { (t, label) ->
-                                    FilterChip(selected = editType == t, onClick = { editType = t }, label = { Text(label) })
+                            com.pesaflow.app.ui.theme.SegChoice(
+                                options = listOf(
+                                    com.pesaflow.app.ui.theme.SegOption("EXPENSE", "Spent", "−"),
+                                    com.pesaflow.app.ui.theme.SegOption("INCOME", "Received", "+"),
+                                    com.pesaflow.app.ui.theme.SegOption("SAVING", "Saved", "◉"),
+                                    com.pesaflow.app.ui.theme.SegOption("TRANSFER", "Moved", "⇄")
+                                ),
+                                selected = editType.name,
+                                onSelect = {
+                                    keyboard?.hide()
+                                    editType = runCatching { TransactionType.valueOf(it) }.getOrDefault(editType)
                                 }
-                            }
+                            )
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                 TextButton(onClick = {

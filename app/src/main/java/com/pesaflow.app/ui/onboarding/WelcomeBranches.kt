@@ -20,8 +20,14 @@ val WELCOME_BRANCHES: List<BranchQ> = listOf(
     BranchQ("cooks"),
     // Costs: parents' roof has no rent; walkers have no fare and no peak run.
     BranchQ("rent", askIf = { it["home"] != "Parents" }),
-    BranchQ("fare", askIf = { it["commute"] != "Walk" }),
-    BranchQ("classTimes", askIf = { it["commute"] != "Walk" }),
+    BranchQ("fare", askIf = { it["commute"] != "Walk" || it["walkOk"] == "No" }),
+    BranchQ("classTimes", askIf = { it["commute"] != "Walk" || it["walkOk"] == "No" }),
+    // If walking is not practical most class days, ask for the fare/timetable.
+    BranchQ("walkOk", askIf = { it["commute"] == "Walk" }),
+    // Cooks: grocery spot feeds the food engine's price context.
+    BranchQ("grocery", askIf = { it["cooks"] == "Yes" }),
+    // Far commuters: usual stages anchor fare estimates to real routes.
+    BranchQ("stages", askIf = { it["commute"] == "Far" }),
     BranchQ("fundSource"),
     // HELB lands once a semester — one figure, never tranches.
     BranchQ("helb", askIf = { it["fundSource"] != "SELF" }),
