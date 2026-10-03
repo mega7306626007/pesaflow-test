@@ -314,6 +314,38 @@ fun TransactionsScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
+            val viewIn = sorted.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }.sumOf { it.amount }
+            val viewOut = sorted.filter { it.type == TransactionType.EXPENSE && !it.isSample }.sumOf { it.amount }
+                val dupClusters = remember(sorted) {
+                    sorted.filter { !it.isSample }.groupBy {
+                        "${it.amount}|${it.merchant.trim().lowercase()}"
+                    }.filter { it.value.size > 1 }.values.toList()
+                }
+                var mergeGroup by remember { mutableStateOf<List<Transaction>?>(null) }
+                // Auto-remove: exact matches only (same amount + merchant +
+                // day + method, minutes apart). Keeps the earliest, undoable.
+                val autoGroups = remember(sorted) { exactDuplicateGroups(sorted) }
+                val autoCount = autoGroups.sumOf { it.size - 1 }
+                var confirmAuto by remember { mutableStateOf(false) }
+                var autoResult by remember { mutableStateOf<String?>(null) }
+                val dayMs = 24L * 60 * 60 * 1000
+                val last14 = remember(sorted) {
+                    val now = System.currentTimeMillis()
+                    // Strict [day, next-day) buckets: the old ..(d0 + dayMs)
+                    // range double-counted any row stamped exactly at midnight.
+                    rollingDays(now, 14).days().map { d0 ->
+                        sorted.filter {
+                            it.type == TransactionType.EXPENSE && !it.isSample &&
+                                it.dateTimestamp >= d0 && it.dateTimestamp < d0 + dayMs
+                        }.sumOf { it.amount }
+                    }
+                }
+                val peak14 = (last14.maxOrNull() ?: 0.0).coerceAtLeast(1.0)
+                val topCats = remember(sorted) {
+                    sorted.filter { it.type == TransactionType.EXPENSE && !it.isSample }
+                        .groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
+                        .entries.sortedByDescending { it.value }.take(5)
+                }
             LazyColumn(
                 Modifier.fillMaxSize().weight(1f),
                 verticalArrangement = Arrangement.spacedBy(PesaSpacing.xs)
@@ -372,10 +404,8 @@ fun TransactionsScreen(
                         item { Spacer(Modifier.height(PesaSpacing.sm)) }
                     }
                 }
-                item { Spacer(Modifier.height(80.dp)) }
-            }
-            val viewIn = sorted.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }.sumOf { it.amount }
-            val viewOut = sorted.filter { it.type == TransactionType.EXPENSE && !it.isSample }.sumOf { it.amount }
+                if (sorted.isNotEmpty()) {
+                item(key = "footer") {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -399,8 +429,8 @@ fun TransactionsScreen(
                         TextButton(onClick = { visibleLimit = sorted.size }) { Text("Show all ${sorted.size}") }
                     }
                 }
-                // Bulk bar: share or delete the selection. Deletes confirm as a
-                // batch (no per-row undo across N rows) — honest destructive UX.
+                }
+                item(key = "bulk") {
                 if (selecting && selection.isNotEmpty()) {
                     val picked = remember(selection, transactions) { transactions.filter { it.id in selection } }
                     val pickedTotal = picked.sumOf { it.amount }
@@ -421,19 +451,8 @@ fun TransactionsScreen(
                         }
                     }
                 }
-                // Duplicate hunt: same amount + merchant more than once.
-                val dupClusters = remember(sorted) {
-                    sorted.filter { !it.isSample }.groupBy {
-                        "${it.amount}|${it.merchant.trim().lowercase()}"
-                    }.filter { it.value.size > 1 }.values.toList()
                 }
-                var mergeGroup by remember { mutableStateOf<List<Transaction>?>(null) }
-                // Auto-remove: exact matches only (same amount + merchant +
-                // day + method, minutes apart). Keeps the earliest, undoable.
-                val autoGroups = remember(sorted) { exactDuplicateGroups(sorted) }
-                val autoCount = autoGroups.sumOf { it.size - 1 }
-                var confirmAuto by remember { mutableStateOf(false) }
-                var autoResult by remember { mutableStateOf<String?>(null) }
+                item(key = "dups") {
                 if (dupClusters.isNotEmpty()) {
                     com.pesaflow.app.ui.theme.PpCard(kind = com.pesaflow.app.ui.theme.PpCardKind.LARGE) {
                         Column(
@@ -496,37 +515,8 @@ fun TransactionsScreen(
                         }
                     }
                 }
-                if (confirmAuto) {
-                    AlertDialog(
-                        onDismissRequest = { confirmAuto = false },
-                        title = { Text("Remove $autoCount duplicates?") },
-                        text = { Text("Same amount, merchant, day and method within minutes. Keeps the earliest of each group — undo brings them back.") },
-                        confirmButton = {
-                            TextButton(onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.autoRemoveExactDuplicates(autoGroups) { n ->
-                                    confirmAuto = false
-                                    autoResult = "Removed $n exact duplicate(s)"
-                                }
-                            }) { Text("Remove") }
-                        },
-                        dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("Keep") } }
-                    )
                 }
-                // 14-day spending bars: text bars, zero new imports.
-                val dayMs = 24L * 60 * 60 * 1000
-                val last14 = remember(sorted) {
-                    val now = System.currentTimeMillis()
-                    // Strict [day, next-day) buckets: the old ..(d0 + dayMs)
-                    // range double-counted any row stamped exactly at midnight.
-                    rollingDays(now, 14).days().map { d0 ->
-                        sorted.filter {
-                            it.type == TransactionType.EXPENSE && !it.isSample &&
-                                it.dateTimestamp >= d0 && it.dateTimestamp < d0 + dayMs
-                        }.sumOf { it.amount }
-                    }
-                }
-                val peak14 = (last14.maxOrNull() ?: 0.0).coerceAtLeast(1.0)
+                item(key = "last14") {
                 com.pesaflow.app.ui.theme.PpCard(kind = com.pesaflow.app.ui.theme.PpCardKind.LARGE) {
                     Column(
                         Modifier.fillMaxWidth(),
@@ -547,12 +537,8 @@ fun TransactionsScreen(
                         }
                     }
                 }
-                // Top categories in this view.
-                val topCats = remember(sorted) {
-                    sorted.filter { it.type == TransactionType.EXPENSE && !it.isSample }
-                        .groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
-                        .entries.sortedByDescending { it.value }.take(5)
                 }
+                item(key = "topcats") {
                 if (topCats.isNotEmpty()) {
                     com.pesaflow.app.ui.theme.PpCard(kind = com.pesaflow.app.ui.theme.PpCardKind.LARGE) {
                         Column(
@@ -583,6 +569,27 @@ fun TransactionsScreen(
                             }
                         }
                     }
+                }
+                }
+                }
+                item { Spacer(Modifier.height(80.dp)) }
+            }
+                if (confirmAuto) {
+                    AlertDialog(
+                        onDismissRequest = { confirmAuto = false },
+                        title = { Text("Remove $autoCount duplicates?") },
+                        text = { Text("Same amount, merchant, day and method within minutes. Keeps the earliest of each group — undo brings them back.") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.autoRemoveExactDuplicates(autoGroups) { n ->
+                                    confirmAuto = false
+                                    autoResult = "Removed $n exact duplicate(s)"
+                                }
+                            }) { Text("Remove") }
+                        },
+                        dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("Keep") } }
+                    )
                 }
                 mergeGroup?.let { g ->
                     AlertDialog(
