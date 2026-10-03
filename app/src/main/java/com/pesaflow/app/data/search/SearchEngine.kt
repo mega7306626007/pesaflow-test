@@ -82,20 +82,26 @@ class SearchEngine {
         )
     }
 
-    /** Fuzzy match: returns true if edit distance <= 2. */
+    /** Conservative fuzzy match: returns true if edit distance <= 1. */
     fun fuzzyMatch(a: String, b: String): Boolean {
-        if (a.length > b.length) return fuzzyMatch(b, a)
-        if (b.length - a.length > 2) return false
-        val dp = IntArray(a.length + 1) { it }
-        for (j in 1..b.length) {
-            var prev = j
-            for (i in 1..a.length) {
-                val temp = dp[i]
-                if (a[i - 1] == b[j - 1]) dp[i] = prev else dp[i] = 1 + minOf(dp[i], dp[i - 1], prev)
-                prev = temp
+        val first = a.lowercase()
+        val second = b.lowercase()
+        if (kotlin.math.abs(first.length - second.length) > 1) return false
+        var previous = IntArray(second.length + 1) { it }
+        for (i in 1..first.length) {
+            val current = IntArray(second.length + 1)
+            current[0] = i
+            for (j in 1..second.length) {
+                val substitutionCost = if (first[i - 1] == second[j - 1]) 0 else 1
+                current[j] = minOf(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + substitutionCost
+                )
             }
+            previous = current
         }
-        return dp[a.length] <= 2
+        return previous[second.length] <= 1
     }
 
     /** Search with fuzzy fallback on merchant names. */
@@ -106,13 +112,15 @@ class SearchEngine {
     ): SearchResult {
         val exact = search(allTxs, query, maxResults = maxResults)
         if (exact.hits.size >= maxResults) return exact
-        val remaining = maxResults - exact.hits.size
         val terms = tokenize(query)
         val fuzzyHits = mutableListOf<SearchHit>()
         for (tx in allTxs) {
             if (exact.hits.any { it.transaction.id == tx.id }) continue
             for (term in terms) {
-                if (fuzzyMatch(term, tx.merchant.lowercase())) {
+                if (term.length >= 5 && tx.merchant.lowercase()
+                        .split(Regex("[^\\p{L}\\p{N}]+"))
+                        .any { merchantTerm -> merchantTerm.isNotBlank() && fuzzyMatch(term, merchantTerm) }
+                ) {
                     fuzzyHits.add(SearchHit(tx, 2.0, listOf("merchant(fuzzy)")))
                     break
                 }

@@ -116,6 +116,30 @@ class SearchEngineTest {
     }
 
     @Test
+    fun `short distinct names are not fuzzy matched`() {
+        val engine = SearchEngine()
+        val people = listOf(
+            tx("Joan", "Upkeep", 100.0),
+            tx("John", "Upkeep", 100.0),
+            tx("Joab", "Upkeep", 100.0)
+        )
+
+        val result = engine.searchWithFuzzy(people, "joan")
+
+        assertEquals(listOf("Joan"), result.hits.map { it.transaction.merchant })
+    }
+
+    @Test
+    fun `fuzzy fallback matches a merchant token rather than a longer phrase`() {
+        val engine = SearchEngine()
+        val transactions = listOf(tx("Nayivas Supermarket", "Food", 500.0))
+
+        val result = engine.searchWithFuzzy(transactions, "Naivas")
+
+        assertEquals(listOf("Nayivas Supermarket"), result.hits.map { it.transaction.merchant })
+    }
+
+    @Test
     fun `searchWithFuzzyReturnsMoreHitsWhenNeeded`() {
         val engine = SearchEngine()
         val exact = engine.search(allTxs, "NonExistent", maxResults = 50)

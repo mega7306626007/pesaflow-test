@@ -37,6 +37,8 @@ import com.pesaflow.app.viewmodels.FinanceViewModel
 import androidx.compose.ui.platform.LocalContext
 import com.pesaflow.app.data.ledger.CategoryMemory
 import com.pesaflow.app.data.ledger.MerchantMemory
+import com.pesaflow.app.data.ledger.ContactBook
+import com.pesaflow.app.data.ledger.deleteContactMemory
 import com.pesaflow.app.data.ledger.saveContactMemory
 import com.pesaflow.app.data.ledger.suggestMemory
 import com.pesaflow.app.data.meals.rentHintFor
@@ -65,13 +67,31 @@ private const val DAY_MS = 24L * 60 * 60 * 1000
 fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
     // Mid-onboarding process death resumes where you left off, not at step 0.
     val bootPrefs = LocalContext.current.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
-    var step by rememberSaveable { mutableStateOf(bootPrefs.getInt("onboarding_step", 0).coerceIn(0, 4)) }
+    var step by rememberSaveable {
+        mutableStateOf(
+            if (bootPrefs.getInt("onboarding_flow_version", 0) >= 2) {
+                bootPrefs.getInt("onboarding_step", 0).coerceIn(0, 5)
+            } else {
+                when (bootPrefs.getInt("onboarding_step", 0).coerceIn(0, 4)) {
+                    0 -> 0
+                    1 -> 2
+                    2 -> 3
+                    3 -> 4
+                    else -> 5
+                }
+            }
+        )
+    }
     // Celebration beats the handoff: seeded → check + stars → home.
     var celebrate by rememberSaveable { mutableStateOf(false) }
     var welcomed by rememberSaveable { mutableStateOf(bootPrefs.getBoolean("onboarding_welcomed", false)) }
     var showDemoConfirmation by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(step, welcomed) {
-        bootPrefs.edit().putInt("onboarding_step", step).putBoolean("onboarding_welcomed", welcomed).apply()
+        bootPrefs.edit()
+            .putInt("onboarding_flow_version", 2)
+            .putInt("onboarding_step", step)
+            .putBoolean("onboarding_welcomed", welcomed)
+            .apply()
     }
 
     fun loadDemoData() {
@@ -168,6 +188,12 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
     // Step 3: SMS priming
     var smsGranted by rememberSaveable { mutableStateOf(false) }
     val appContext = LocalContext.current
+    var contactName by rememberSaveable { mutableStateOf("") }
+    var contactRelationship by rememberSaveable { mutableStateOf("") }
+    var contactCategory by rememberSaveable { mutableStateOf("") }
+    var contactAliases by rememberSaveable { mutableStateOf("") }
+    var contactScope by rememberSaveable { mutableStateOf("BOTH") }
+    var onboardingContacts by remember { mutableStateOf(ContactBook.readAll(bootPrefs)) }
     val scanScope = rememberCoroutineScope()
     var scanResult by remember { mutableStateOf<SmsScanResult?>(null) }
     // One card per unknown sender — name once, all their rows file themselves.
@@ -230,33 +256,155 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
         ) {
             Spacer(modifier = Modifier.height(8.dp))
             LinearProgressIndicator(
-                progress = { (step + 1) / 5f },
+                progress = { (step + 1) / 6f },
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant
             )
             Text(
                 when (step) {
-                    0 -> "Step 1 of 5 · Who are you?"
-                    1 -> "Step 2 of 5 · Auto-tracking"
-                    2 -> "Step 3 of 5 · Semester money"
-                    3 -> "Step 4 of 5 · Tell us about you"
-                    else -> "Step 5 of 5 · Review & start"
+                    0 -> "Step 1 of 6 · Who are you?"
+                    1 -> "Step 2 of 6 · People & categories"
+                    2 -> "Step 3 of 6 · Auto-tracking"
+                    3 -> "Step 4 of 6 · Semester money"
+                    4 -> "Step 5 of 6 · Tell us about you"
+                    else -> "Step 6 of 6 · Review & start"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // Scan-first order: SMS auto-tracking lands on step 2 (the magic
-            // moment — their own data populates the app). Income setup was
-            // dropped: scan + upkeep/HELB carry it. Finish is order-independent.
+            // Keep old in-progress onboarding positions stable while inserting
+            // contact rules before the first SMS scan.
             val page = when (step) {
-                1 -> 4
-                3 -> 1
-                4 -> 5
+                1 -> 6
+                2 -> 4
+                3 -> 2
+                4 -> 1
+                5 -> 5
                 else -> step
             }
             when (page) {
+                6 -> {
+                    Text("Who should PesaFlow recognize? 👥", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Add people before scanning so their transactions are categorized from the first SMS. You can change these rules later in Contact Book.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = contactName,
+                        onValueChange = { contactName = it },
+                        label = { Text("Person's name (e.g. Joan)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = contactRelationship,
+                        onValueChange = { contactRelationship = it },
+                        label = { Text("Relationship or label (e.g. Brother)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = contactCategory,
+                        onValueChange = { contactCategory = it },
+                        label = { Text("Usual transaction category (optional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = contactAliases,
+                        onValueChange = { contactAliases = it },
+                        label = { Text("Other names in messages (optional, comma-separated)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Text("Apply category to", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    com.pesaflow.app.ui.theme.SegChoice(
+                        options = listOf(
+                            com.pesaflow.app.ui.theme.SegOption("BOTH", "Money in & out", "↔"),
+                            com.pesaflow.app.ui.theme.SegOption("IN", "Money in", "↓"),
+                            com.pesaflow.app.ui.theme.SegOption("OUT", "Money out", "↑")
+                        ),
+                        selected = contactScope,
+                        onSelect = { contactScope = it }
+                    )
+                    Button(
+                        onClick = {
+                            val cleanName = contactName.trim()
+                            if (cleanName.isBlank() || (contactRelationship.isBlank() && contactCategory.isBlank())) {
+                                android.widget.Toast.makeText(
+                                    appContext,
+                                    "Add a name and a relationship or category.",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                val saved = ContactBook.save(
+                                    prefs = bootPrefs,
+                                    name = cleanName,
+                                    displayName = cleanName,
+                                    relationship = contactRelationship,
+                                    category = contactCategory,
+                                    scope = contactScope,
+                                    notes = "",
+                                    matchTerms = contactAliases
+                                ) && saveContactMemory(
+                                    prefs = bootPrefs,
+                                    name = cleanName,
+                                    label = contactRelationship,
+                                    category = contactCategory,
+                                    scope = contactScope,
+                                    matchTerms = contactAliases
+                                )
+                                if (saved) {
+                                    onboardingContacts = ContactBook.readAll(bootPrefs)
+                                    contactName = ""
+                                    contactRelationship = ""
+                                    contactCategory = ""
+                                    contactAliases = ""
+                                    contactScope = "BOTH"
+                                } else {
+                                    android.widget.Toast.makeText(
+                                        appContext,
+                                        "Could not save this contact. Please check the details and try again.",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Save person") }
+                    onboardingContacts.forEach { contact ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(contact.displayName, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        listOf(contact.relationship, contact.category).filter { it.isNotBlank() }.joinToString(" · "),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    ContactBook.delete(bootPrefs, contact.name)
+                                    deleteContactMemory(bootPrefs, contact.name)
+                                    onboardingContacts = ContactBook.readAll(bootPrefs)
+                                }) { Text("Remove") }
+                            }
+                        }
+                    }
+                    if (onboardingContacts.isEmpty()) {
+                        Text("No people added yet? You can skip this step and add them later.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 0 -> {
                     StepArt(R.drawable.bg_university_campus)
                     Text("Kwanza, unaitwa nani? 🙂", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -857,9 +1005,9 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                 TextButton(onClick = { if (step > 0) step-- }, enabled = step > 0) { Text("Back") }
                 Button(
                     onClick = {
-                        if (step == 4 && semesterStartMillis > 0L && endMillis > 0L && endMillis <= semesterStartMillis) {
+                        if (step == 5 && semesterStartMillis > 0L && endMillis > 0L && endMillis <= semesterStartMillis) {
                             android.widget.Toast.makeText(appContext, "Semester end must be after its start.", android.widget.Toast.LENGTH_LONG).show()
-                        } else if (step < 4) {
+                        } else if (step < 5) {
                             step++
                         } else {
                             val now = System.currentTimeMillis()
@@ -1098,7 +1246,7 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     },
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
-                ) { Text(if (step < 4) "Next" else "Start Tracking 💰", fontWeight = FontWeight.Bold) }
+                ) { Text(if (step < 5) "Next" else "Start Tracking 💰", fontWeight = FontWeight.Bold) }
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
