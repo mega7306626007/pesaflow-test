@@ -287,6 +287,27 @@ fun DashboardScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Bold
                             )
+                            // Actual ledger arithmetic — same filters as the engine, never hardcoded.
+                            val bb = remember(transactions) {
+                                com.pesaflow.app.data.finance.balanceBreakdown(
+                                    transactions, System.currentTimeMillis()
+                                )
+                            }
+                            Text(
+                                "How balance is built (Recorded):",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text("Received +${fmt.compact(com.pesaflow.app.data.finance.Money.of(bb.received))}", style = MaterialTheme.typography.bodySmall)
+                            if (bb.opening != 0.0) Text("Opening +${fmt.compact(com.pesaflow.app.data.finance.Money.of(bb.opening))}", style = MaterialTheme.typography.bodySmall)
+                            Text("Spending −${fmt.compact(com.pesaflow.app.data.finance.Money.of(bb.spending))}", style = MaterialTheme.typography.bodySmall)
+                            if (bb.saved != 0.0) Text("Saved −${fmt.compact(com.pesaflow.app.data.finance.Money.of(bb.saved))}", style = MaterialTheme.typography.bodySmall)
+                            if (bb.transferNet != 0.0) Text("Transfers ${fmt.compact(com.pesaflow.app.data.finance.Money.of(bb.transferNet))}", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                "Not included: future rows (${bb.futureExcludedCount}), planned unpaid bills, budgets, predictions.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Text(
                                 why?.why ?: "Based on your recorded ledger. Projections are labelled separately.",
                                 style = MaterialTheme.typography.bodySmall,
@@ -295,6 +316,82 @@ fun DashboardScreen(
                             (why?.contributors.orEmpty()).forEach {
                                 Text("• $it", style = MaterialTheme.typography.bodySmall)
                             }
+                        }
+                    }
+                }
+            }
+
+
+            // PRESSURE — the single most important obligation, never invented.
+            item {
+                val snap2 by viewModel.financialSnapshot.collectAsState()
+                val fmt = com.pesaflow.app.data.finance.MoneyFormatter
+                PpSectionHeader(title = "Pressure")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val top = snap2.obligations.firstOrNull()
+                        if (top == null && snap2.upcomingFees.toDouble() <= 0) {
+                            Text("No upcoming pressure.", style = MaterialTheme.typography.bodyMedium)
+                        } else {
+                            if (top != null) {
+                                val when_ = when {
+                                    top.overdue -> "overdue"
+                                    top.dueInDays <= 0 -> "due today"
+                                    top.dueInDays == 1 -> "due tomorrow"
+                                    else -> "due in ${top.dueInDays} days"
+                                }
+                                Text(
+                                    "${top.name} — ${fmt.compact(top.remaining)} ($when_)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                val rest = snap2.obligations.size - 1
+                                if (rest > 0) Text(
+                                    "+ $rest more obligation${if (rest == 1) "" else "s"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (snap2.upcomingFees.toDouble() > 0) Text(
+                                "Semester fees outstanding: ${fmt.compact(snap2.upcomingFees)} (User entered)",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            }
+
+            // NEXT — exactly one useful action, by priority. Never a feed.
+            item {
+                val snap3 by viewModel.financialSnapshot.collectAsState()
+                PpSectionHeader(title = "Next")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        when {
+                            snap3.liquid.toDouble() < 0 -> {
+                                Text("Reconcile your current balance.", style = MaterialTheme.typography.bodyMedium)
+                                TextButton(onClick = { onNavigate(NavRoutes.TRANSACTIONS) }) { Text("Review ledger →") }
+                            }
+                            pendingTransactions.isNotEmpty() -> {
+                                Text("Review ${pendingTransactions.size} confirming transaction${if (pendingTransactions.size == 1) "" else "s"} below.", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            budgets.isEmpty() -> {
+                                Text("Create your first budget.", style = MaterialTheme.typography.bodyMedium)
+                                TextButton(onClick = { onNavigate(NavRoutes.BUDGETS) }) { Text("Set a budget →") }
+                            }
+                            (profile?.feesAmount ?: 0.0) <= 0 -> {
+                                Text("Add your semester fee.", style = MaterialTheme.typography.bodyMedium)
+                                TextButton(onClick = { onNavigate(NavRoutes.UNIVERSITY) }) { Text("University →") }
+                            }
+                            else -> Text("Nothing urgent — you're up to date.", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -605,6 +702,19 @@ fun DashboardScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary
                             )
+                        }
+                        // Negative ledger recovery: explain, never hide or auto-fix.
+                        if (!hideBalances && availableBalance < 0) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            ExplainChip(
+                                label = "Why is this negative?",
+                                body = "Your recorded transactions show more money leaving than entering. " +
+                                    "This can happen if your opening balance was not recorded, income is missing, " +
+                                    "a transaction was duplicated, or a transfer was recorded incorrectly. " +
+                                    "PesaFlow will never change your ledger by itself — review it and reconcile " +
+                                    "only what you confirm."
+                            )
+                            TextButton(onClick = { onNavigate(NavRoutes.TRANSACTIONS) }) { Text("Review ledger →") }
                         }
                         // Drift check: ledger's M-Pesa pocket vs the last SMS
                         // reading, in tolerance zones. Small gaps get a gentle
@@ -921,7 +1031,9 @@ fun DashboardScreen(
                     goals = savingsGoals,
                     bills = bills,
                     flexibleCash = financialSnapshot.flexible.toDouble(),
-                    hide = hideBalances
+                    hide = hideBalances,
+                    mpesaCash = mpesaBal,
+                    totalCash = availableBalance
                 )
             }
             }

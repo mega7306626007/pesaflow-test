@@ -132,6 +132,25 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
                 ),
                 footer = "Semester dates are you-entered (University tab). The app never guesses your calendar — unset dates say so instead of a fake countdown."
             )
+            // Semester funding: expected vs known fees vs remaining need.
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text("Semester funding", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Expected funding (You entered): KSh ${(profile?.startingFunding ?: 0.0).toInt() + financialSnapshot.helbExpected.toDouble().toInt()}", style = MaterialTheme.typography.bodySmall)
+                    Text("HELB upkeep share (Recorded): KSh ${financialSnapshot.helbUpkeep.toDouble().toInt()}", style = MaterialTheme.typography.bodySmall)
+                    Text("Known fees (You entered): KSh ${(profile?.feesAmount ?: 0.0).toInt()}", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Remaining semester need (Calculated): KSh ${financialSnapshot.upcomingFees.toDouble().toInt()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
             // Countdown hero
             Card(
                 modifier = Modifier.fillMaxWidth(),

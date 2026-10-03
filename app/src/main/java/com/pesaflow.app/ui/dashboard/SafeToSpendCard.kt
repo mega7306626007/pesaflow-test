@@ -44,7 +44,11 @@ fun SafeToSpendCard(
     goals: List<com.pesaflow.app.data.models.SavingsGoal>,
     bills: List<com.pesaflow.app.data.models.Bill>,
     flexibleCash: Double,
-    hide: Boolean = false
+    hide: Boolean = false,
+    // M-Pesa anchor: safe guidance reads against the pocket you actually
+    // spend from. Formula unchanged — this only labels the anchor.
+    mpesaCash: Double? = null,
+    totalCash: Double? = null
 ) {
     val nowMs = System.currentTimeMillis()
     val budgetLimits = safeSpendBudgetLimits(budgets, nowMs)
@@ -76,6 +80,13 @@ fun SafeToSpendCard(
                         FilterChip(selected = mode == m, onClick = { mode = m }, label = { Text(m) })
                     }
                 }
+            }
+            if (mpesaCash != null && totalCash != null && !hide) {
+                Text(
+                    "Based on M-Pesa KSh ${mpesaCash.toInt()} of KSh ${totalCash.toInt()} total (Recorded)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Spacer(modifier = Modifier.height(8.dp))
             if (monthly == null && dailyExplicit == null && weeklyExplicit == null) {

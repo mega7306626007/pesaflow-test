@@ -222,11 +222,21 @@ asOfTimestamp: Long = System.currentTimeMillis()
             val usual = sums[idx] / 4
             val dayName = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[idx]
             if (usual > 0 && todaySpend > usual * 2 && todaySpend - usual >= 200) {
+                val diff = (todaySpend - usual).toInt()
                 out.add(t(
-                    "Unusual $dayName: KSh ${todaySpend.toInt()} today vs usual KSh ${usual.toInt()}. Big day or double-log? 👀",
-                    "Siku weird: KSh ${todaySpend.toInt()} leo vs kawaida KSh ${usual.toInt()} $dayName. Siku kubwa ama double-log? 👀",
-                    "Siku ya ajabu: KSh ${todaySpend.toInt()} leo dhidi ya kawaida KSh ${usual.toInt()}. 👀",
-                    "Unusual $dayName: KSh ${todaySpend.toInt()} vs usual KSh ${usual.toInt()}. 👀"
+                    "Your $dayName spending is higher than usual. Today KSh ${todaySpend.toInt()} vs your recent $dayName average KSh ${usual.toInt()} (+KSh $diff). At this pace your flexible money runs out earlier — check today's rows. 👀",
+                    "Matumizi yako ya $dayName ni juu kuliko kawaida. Leo KSh ${todaySpend.toInt()} vs wastani KSh ${usual.toInt()} (+KSh $diff). Kwa mwendo huu pesa yako ya flexible itaisha mapema — angalia leo. 👀",
+                    "Matumizi ya $dayName yuko juu. Leo KSh ${todaySpend.toInt()} dhidi ya kawaida KSh ${usual.toInt()} (+KSh $diff). 👀",
+                    "Your $dayName spending is higher than usual: KSh ${todaySpend.toInt()} vs KSh ${usual.toInt()} (+KSh $diff). 👀"
+                ))
+            } else if (todaySpend >= 500 && usual <= 0) {
+                // Honest when history is thin: never fabricate a baseline.
+                // Gated on a meaningful day so fresh users aren't nagged daily.
+                out.add(t(
+                    "Not enough history to compare your spending yet — log a few more $dayName days first.",
+                    "Historia haitoshi kulinganisha matumizi yako bado.",
+                    "Historia haitoshi.",
+                    "Not enough history yet."
                 ))
             }
         }

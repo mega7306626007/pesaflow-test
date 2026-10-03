@@ -25,6 +25,7 @@ import com.pesaflow.app.data.income.expectedIncomeLandings
 import com.pesaflow.app.data.money.ledgerBalance
 import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.ui.theme.ExplainChip
 import com.pesaflow.app.ui.theme.PpCard
 import com.pesaflow.app.ui.theme.PpCardKind
 import com.pesaflow.app.ui.theme.PpProgress
@@ -89,6 +90,21 @@ fun Next30DaysCard(
                 title = "Next 30 days 🔮",
                 subtitle = "Paydays + bills + subscriptions vs KSh ${if (hide) "••••" else heldForLabel.toInt()} held (Calculated)" +
                     (if (!hide && inflowDays != null) " · inflow in $inflowDays day${if (inflowDays == 1) "" else "s"} 📥" else "")
+            )
+            // Expected endpoint, always labelled as projection — e.g.
+            // "Expected by 2 Nov: -KSh 12,000 (Projected)".
+            if (!hide) {
+                Text(
+                    "Expected by $lowDate: $lowText (Projected)",
+                    style = ppTypography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (low.balance < 0) ppColors.error else ppColors.success
+                )
+            }
+            ExplainChip(
+                label = "Why this projection?",
+                body = "Expected paydays plus known bills and subscriptions, counted against money held, at your recent daily pace. " +
+                    "A projection, never a guarantee — irregular income is not assumed."
             )
             val expectedIncome = projection.days
                 .flatMap { day -> day.events.filter { it.amount > 0 }.map { day.dayStart to it } }

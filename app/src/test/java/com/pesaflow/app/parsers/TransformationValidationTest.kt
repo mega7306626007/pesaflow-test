@@ -1,0 +1,134 @@
+package com.pesaflow.app.parsers
+
+import com.pesaflow.app.data.finance.MoneyFormatter
+import com.pesaflow.app.data.finance.SnapshotInput
+import com.pesaflow.app.data.finance.balanceBreakdown
+import com.pesaflow.app.data.finance.buildSnapshot
+import com.pesaflow.app.data.models.Bill
+import com.pesaflow.app.data.models.PaymentMethod
+import com.pesaflow.app.data.models.Transaction
+import com.pesaflow.app.data.models.TransactionType
+import org.junit.Assert.*
+import org.junit.Test
+
+// Transformation validation: scenarios A–M. Engine semantics pinned so UX
+// work can never silently change financial truth.
+class TransformationValidationTest {
+
+    private val day = 24L * 60 * 60 * 1000
+    private val now = System.currentTimeMillis()
+
+    private fun tx(amount: Double, type: TransactionType, ts: Long = now - day, opening: Boolean = false) =
+        Transaction(amount = amount, type = type, category = "T", dateTimestamp = ts,
+            merchant = "M", paymentMethod = PaymentMethod.MPESA, isOpening = opening)
+
+    private fun snap(txs: List<Transaction>, fees: Double = 0.0, helb: Double = 0.0) =
+        buildSnapshot(SnapshotInput(txs = txs, feesAmount = fees, helbExpected = helb, nowMs = now))
+
+    @Test fun `A empty ledger is zero not null`() {
+        val s = snap(emptyList())
+        assertEquals(0.0, s.liquid.toDouble(), 0.001)
+        assertEquals(0.0, s.flexible.toDouble(), 0.001)
+    }
+
+    @Test fun `B opening only becomes liquid but never earned`() {
+        val s = snap(listOf(tx(5000.0, TransactionType.INCOME, opening = true)))
+        assertEquals(5000.0, s.liquid.toDouble(), 0.001)
+        assertEquals(0.0, s.monthlyEarnedIncome.toDouble(), 0.001)
+    }
+
+    @Test fun `C income only`() {
+        val s = snap(listOf(tx(3000.0, TransactionType.INCOME)))
+        assertEquals(3000.0, s.liquid.toDouble(), 0.001)
+    }
+
+    @Test fun `D expenses only may go negative`() {
+        val s = snap(listOf(tx(1200.0, TransactionType.EXPENSE)))
+        assertEquals(-1200.0, s.liquid.toDouble(), 0.001)
+        assertEquals(0.0, s.flexible.toDouble(), 0.001)
+    }
+
+    @Test fun `E income plus expenses`() {
+        val s = snap(listOf(tx(3000.0, TransactionType.INCOME), tx(1200.0, TransactionType.EXPENSE)))
+        assertEquals(1800.0, s.liquid.toDouble(), 0.001)
+    }
+
+    @Test fun `F future transactions excluded`() {
+        val s = snap(listOf(
+            tx(1000.0, TransactionType.INCOME),
+            tx(99999.0, TransactionType.INCOME, ts = now + 10 * day)
+        ))
+        assertEquals(1000.0, s.liquid.toDouble(), 0.001)
+        val bb = balanceBreakdown(
+            listOf(
+                tx(1000.0, TransactionType.INCOME),
+                tx(99999.0, TransactionType.INCOME, ts = now + 10 * day)
+            ), now
+        )
+        assertEquals(1, bb.futureExcludedCount)
+        assertEquals(1000.0, bb.liquid, 0.001)
+    }
+
+    @Test fun `G paired transfer nets zero`() {
+        val g = "g1"
+        val out = tx(500.0, TransactionType.TRANSFER).copy(transferGroupId = g, transferSide = "OUT")
+        val inn = tx(500.0, TransactionType.TRANSFER).copy(transferGroupId = g, transferSide = "IN")
+        val s = snap(listOf(tx(1000.0, TransactionType.INCOME), out, inn))
+        assertEquals(1000.0, s.liquid.toDouble(), 0.001)
+    }
+
+    @Test fun `G unpaired transfer ignored`() {
+        val s = snap(listOf(
+            tx(1000.0, TransactionType.INCOME),
+            tx(500.0, TransactionType.TRANSFER)
+        ))
+        assertEquals(1000.0, s.liquid.toDouble(), 0.001)
+    }
+
+    @Test fun `H savings reduce liquid but keep assets`() {
+        val s = snap(listOf(tx(2000.0, TransactionType.INCOME), tx(500.0, TransactionType.SAVING)))
+        assertEquals(1500.0, s.liquid.toDouble(), 0.001)
+        assertEquals(2000.0, s.totalAssets.toDouble(), 0.001)
+    }
+
+    @Test fun `I planned fee commits but does not move balance`() {
+        val s = snap(listOf(tx(10000.0, TransactionType.INCOME)), fees = 32000.0)
+        assertEquals(10000.0, s.liquid.toDouble(), 0.001)
+        assertEquals(32000.0, s.upcomingFees.toDouble(), 0.001)
+        assertEquals(0.0, s.flexible.toDouble(), 0.001)
+    }
+
+    @Test fun `J actual fee payment moves balance`() {
+        val s = snap(listOf(
+            tx(10000.0, TransactionType.INCOME),
+            tx(2000.0, TransactionType.EXPENSE)
+        ), fees = 32000.0)
+        assertEquals(8000.0, s.liquid.toDouble(), 0.001)
+    }
+
+    @Test fun `K duplicate rows both count`() {
+        val s = snap(listOf(tx(100.0, TransactionType.EXPENSE), tx(100.0, TransactionType.EXPENSE)))
+        assertEquals(-200.0, s.liquid.toDouble(), 0.001)
+    }
+
+    @Test fun `L negative ledger stays negative with zero flexible`() {
+        val s = snap(listOf(tx(50000.0, TransactionType.INCOME), tx(252000.0, TransactionType.EXPENSE)))
+        assertEquals(-202000.0, s.liquid.toDouble(), 0.001)
+        assertEquals(0.0, s.flexible.toDouble(), 0.001)
+        assertEquals(0.0, s.safeToday.toDouble(), 0.001)
+    }
+
+    @Test fun `M large values format without overflow`() {
+        val s = snap(listOf(tx(5_000_000.0, TransactionType.INCOME)))
+        assertEquals(5_000_000.0, s.liquid.toDouble(), 0.001)
+        val label = MoneyFormatter.compact(s.liquid)
+        assertTrue(label.isNotBlank())
+        assertTrue(label.contains("5"))
+    }
+
+    @Test fun `samples never count`() {
+        val t = tx(99999.0, TransactionType.INCOME).copy(isSample = true)
+        val s = snap(listOf(t))
+        assertEquals(0.0, s.liquid.toDouble(), 0.001)
+    }
+}

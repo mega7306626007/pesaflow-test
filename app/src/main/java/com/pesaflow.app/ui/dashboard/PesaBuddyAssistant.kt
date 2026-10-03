@@ -429,8 +429,8 @@ fun processUserInput(
                 val wctx = viewModel.getApplication<android.app.Application>().applicationContext
                 val wnote = com.pesaflow.app.data.parsers.readMpesaBalance(wctx)?.let { " (wallet: KSh ${it.first.toInt()})" } ?: ""
                 if (num == null) "Tell me the price — e.g. 'afford 500?' — and I'll check it against your balance and budget."
-                else if (num <= freeBalance && (monthlyBudget == null || monthExpense + num <= monthlyBudget)) "Yes — KSh ${num.toInt()} fits: flexible KSh ${freeBalance.toInt()}" + (if (monthlyBudget != null) " and inside the monthly envelope. ✅" else ". ✅") + wnote
-                else "Careful — KSh ${num.toInt()} vs flexible KSh ${freeBalance.toInt()}" + (if (committed > 0) " (KSh ${committed.toInt()} committed/reserved)" else " (cash held KSh ${balance.toInt()})") + (if (monthlyBudget != null) " and only KSh ${(monthlyBudget - monthExpense).toInt()} monthly budget left." else ".") + wnote + " Sleep on it? 😴"
+                else if (num <= freeBalance && (monthlyBudget == null || monthExpense + num <= monthlyBudget)) "Your current balance is KSh ${balance.toInt()}, and flexible money is KSh ${freeBalance.toInt()} — KSh ${committed.toInt()} is committed and KSh ${financial.riskBuffer.toDouble().toInt()} is your safety buffer. Yes — KSh ${num.toInt()} fits." + (if (monthlyBudget != null) " Inside the monthly envelope too. ✅" else " ✅") + wnote
+                else "Your current balance is KSh ${balance.toInt()}, but flexible money is KSh ${freeBalance.toInt()} because KSh ${committed.toInt()} is committed and KSh ${financial.riskBuffer.toDouble().toInt()} is reserved as your safety buffer. Careful with KSh ${num.toInt()}." + (if (monthlyBudget != null) " Only KSh ${(monthlyBudget - monthExpense).toInt()} monthly budget left." else "") + wnote + " Sleep on it? 😴"
             }
 
         q.contains("split") ->

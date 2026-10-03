@@ -588,6 +588,12 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                                 style = com.pesaflow.app.ui.theme.ppTypography.bodySmall,
                                 color = com.pesaflow.app.ui.theme.ppColors.textTertiary
                             )
+                            // Budget-vs-balance: a plan is not cash.
+                            Text(
+                                "Budget remaining — not your total money (Current balance KSh ${financialSnapshot.liquid.toDouble().toInt()}).",
+                                style = com.pesaflow.app.ui.theme.ppTypography.bodySmall,
+                                color = com.pesaflow.app.ui.theme.ppColors.textTertiary
+                            )
                             if (budget.sharedWith.isNotBlank()) {
                                 val members = budget.sharedWith.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                                 Text(
