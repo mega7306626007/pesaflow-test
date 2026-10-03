@@ -458,7 +458,7 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
                     NavRoutes.GOALS -> GoalsScreen(goals = goals, transactions = transactions)
                     NavRoutes.CONTACTS -> {
                         val prefs = context.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
-                        val contacts = ContactBook.readAll(prefs)
+                        var contacts = ContactBook.readAll(prefs)
                         val contactRuleScanStatus by viewModel.contactRuleScanStatus.collectAsState()
                         val contactRescanActive by viewModel.contactRescanActive.collectAsState()
                         ContactBookScreen(
@@ -473,11 +473,15 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
                                         prefs, name, rel, cat, scope, matchTerms
                                     )
                                     viewModel.reprocessContactSmsHistory(name, matchTerms)
+                                    // Refresh the list so the new contact appears immediately
+                                    contacts = ContactBook.readAll(prefs)
                                 }
                             },
                             onDelete = { name ->
                                 ContactBook.delete(prefs, name)
                                 com.pesaflow.app.data.ledger.deleteContactMemory(prefs, name)
+                                // Refresh the list so the removed contact disappears immediately
+                                contacts = ContactBook.readAll(prefs)
                             }
                         )
                     }
