@@ -51,4 +51,12 @@ interface PendingTransactionDao {
 
     @Query("UPDATE pending_transactions SET category = :category, merchant = :merchant WHERE id = :id")
     suspend fun updatePendingTransaction(id: String, category: String, merchant: String)
+
+    @Query("UPDATE pending_transactions SET category = :category, displayCategory = :displayCategory, displayMerchant = :displayMerchant WHERE id = :id")
+    suspend fun updateClassification(
+        id: String,
+        category: String,
+        displayCategory: String,
+        displayMerchant: String
+    )
 }

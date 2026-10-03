@@ -1,8 +1,10 @@
 package com.pesaflow.app.viewmodels
 
 import android.app.Application
+import android.content.pm.PackageManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.core.content.ContextCompat
 import com.pesaflow.app.data.database.AppDatabase
 import com.pesaflow.app.data.finance.Commute
 import com.pesaflow.app.data.finance.DebtLevel
@@ -20,7 +22,13 @@ import com.pesaflow.app.data.ledger.LedgerGateway
 import com.pesaflow.app.data.models.*
 import com.pesaflow.app.data.parsers.NaturalLanguageParser
 import com.pesaflow.app.data.repositories.FinanceRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 
@@ -29,6 +37,53 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
     private val database: AppDatabase = AppDatabase.getDatabase(application)
     private val repository: FinanceRepository = FinanceRepository(database)
+
+    private val _contactRuleScanStatus = MutableStateFlow<String?>(null)
+    val contactRuleScanStatus: StateFlow<String?> = _contactRuleScanStatus.asStateFlow()
+    private var contactRuleScanJob: Job? = null
+
+    fun reprocessContactSmsHistory() {
+        contactRuleScanJob?.cancel()
+        contactRuleScanJob = viewModelScope.launch(Dispatchers.IO) {
+            _contactRuleScanStatus.value = "Re-scanning your SMS history and applying contact categories…"
+            val context = getApplication<Application>()
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.READ_SMS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                _contactRuleScanStatus.value =
+                    "Rule saved. Enable SMS access to apply it to existing messages; new scans will use it automatically."
+                return@launch
+            }
+            try {
+                val scanContext = currentCoroutineContext()
+                val result = com.pesaflow.app.data.parsers.scanRecentSms(
+                    context = context,
+                    maxRows = Int.MAX_VALUE,
+                    pageSize = 500,
+                    sinceTimestamp = 0L,
+                    isCancelled = { !scanContext.isActive },
+                    persistDerivedSignals = false
+                )
+                scanContext.ensureActive()
+                if (result.error != null) {
+                    _contactRuleScanStatus.value =
+                        "Rule saved, but SMS history could not be fully scanned: ${result.error}"
+                    return@launch
+                }
+                val (pending, confirmed) = repository.reclassifySmsRows(result.parsed)
+                val cappedNote = if (result.capped) " Scan limit reached; not all messages were reviewed." else ""
+                _contactRuleScanStatus.value =
+                    "Scanned ${result.found} official texts (${result.parsed.size} parsed): recategorized $pending pending and $confirmed confirmed transactions.$cappedNote"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _contactRuleScanStatus.value =
+                    "Rule saved, but applying it to SMS history failed: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
 
 
     // StateFlows for UI

@@ -441,13 +441,18 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
                     NavRoutes.CONTACTS -> {
                         val prefs = context.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
                         val contacts = ContactBook.readAll(prefs)
+                        val contactRuleScanStatus by viewModel.contactRuleScanStatus.collectAsState()
                         ContactBookScreen(
                             contacts = contacts,
+                            reprocessStatus = contactRuleScanStatus,
                             onSave = { name, display, rel, cat, scope, notes, matchTerms ->
-                                ContactBook.save(prefs, name, display, rel, cat, scope, notes, matchTerms)
-                                com.pesaflow.app.data.ledger.saveContactMemory(
-                                    prefs, name, rel, cat, scope, matchTerms
-                                )
+                                val saved = ContactBook.save(prefs, name, display, rel, cat, scope, notes, matchTerms)
+                                if (saved) {
+                                    com.pesaflow.app.data.ledger.saveContactMemory(
+                                        prefs, name, rel, cat, scope, matchTerms
+                                    )
+                                    viewModel.reprocessContactSmsHistory()
+                                }
                             },
                             onDelete = { name ->
                                 ContactBook.delete(prefs, name)

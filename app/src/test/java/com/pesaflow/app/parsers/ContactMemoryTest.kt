@@ -160,4 +160,15 @@ class ContactMemoryTest {
         assertTrue(com.pesaflow.app.data.ledger.hasContactMemory("Nancy Wanjiku", memory))
         assertFalse(com.pesaflow.app.data.ledger.hasContactMemory("Nancyland Shop", memory))
     }
+
+    @Test
+    fun `primary contact name classifies expanded transaction merchant`() {
+        val memory = mapOf("Nancy" to ContactMemory("Sister", "Upkeep", "IN"))
+        val row = tx("Payment from Nancy Wanjiku", 1200.0, TransactionType.INCOME)
+
+        val classified = applyContactMemory(listOf(row), memory).single()
+
+        assertEquals("Upkeep", classified.category)
+        assertEquals("Payment from Nancy Wanjiku · Sister", classified.displayMerchant)
+    }
 }

@@ -317,6 +317,65 @@ class FinanceRepository(private val database: AppDatabase) {
         }
     }
 
+    suspend fun reclassifySmsRows(rows: List<PendingTransaction>): Pair<Int, Int> {
+        if (rows.isEmpty()) return 0 to 0
+        val pendingRows = database.pendingTransactionDao().getAllPendingTransactions().first()
+            .filter { it.source == TransactionSource.MPESA_SMS }
+        val confirmedRows = database.transactionDao().getAllTransactions().first()
+            .filter { it.source == TransactionSource.MPESA_SMS }
+        val updatedPendingIds = mutableSetOf<String>()
+        val updatedTransactionIds = mutableSetOf<String>()
+        var pendingUpdated = 0
+        var transactionsUpdated = 0
+
+        rows.filter { it.displayCategory.isNotBlank() }.forEach { parsed ->
+            val code = parsed.sourceTransactionId?.takeIf { it.isNotBlank() }
+            val pending = if (code != null) {
+                pendingRows.firstOrNull { it.sourceTransactionId == code }
+            } else {
+                pendingRows.firstOrNull {
+                    it.sourceTransactionId == null &&
+                        it.amount == parsed.amount &&
+                        it.dateTimestamp == parsed.dateTimestamp &&
+                        it.rawText == parsed.rawText
+                }
+            }
+            if (pending != null && pending.id !in updatedPendingIds && pending.category != parsed.category) {
+                database.pendingTransactionDao().updateClassification(
+                    pending.id,
+                    parsed.category,
+                    parsed.displayCategory,
+                    parsed.displayMerchant
+                )
+                updatedPendingIds.add(pending.id)
+                pendingUpdated++
+            }
+
+            val transaction = if (code != null) {
+                confirmedRows.firstOrNull { it.sourceTransactionId == code }
+            } else {
+                confirmedRows.firstOrNull {
+                    it.sourceTransactionId == null &&
+                        it.amount == parsed.amount &&
+                        it.dateTimestamp == parsed.dateTimestamp &&
+                        it.description == parsed.rawText
+                }
+            }
+            if (transaction != null && transaction.id !in updatedTransactionIds &&
+                transaction.category != parsed.category
+            ) {
+                database.transactionDao().updateCategory(
+                    transaction.id,
+                    parsed.category,
+                    System.currentTimeMillis()
+                )
+                updatedTransactionIds.add(transaction.id)
+                transactionsUpdated++
+            }
+        }
+        return pendingUpdated to transactionsUpdated
+    }
+
 
     suspend fun deletePendingTransaction(id: String) {
         database.pendingTransactionDao().deletePendingTransaction(id)

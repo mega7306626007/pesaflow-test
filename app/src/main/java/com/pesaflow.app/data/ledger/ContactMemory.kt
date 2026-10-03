@@ -125,8 +125,8 @@ fun suggestMemory(text: String): ContactMemory {
 
 fun hasContactMemory(name: String, memories: Map<String, ContactMemory>): Boolean {
     if (normalizeContact(name) in memories) return true
-    return memories.values.any { memory ->
-        memory.matchTerms.any { term ->
+    return memories.any { (contactName, memory) ->
+        (listOf(contactName) + memory.matchTerms).any { term ->
             Regex(
                 "(?<![\\p{L}\\p{N}])${Regex.escape(term)}(?![\\p{L}\\p{N}])",
                 RegexOption.IGNORE_CASE
@@ -142,8 +142,8 @@ fun applyContactMemory(
     memories: Map<String, ContactMemory>
 ): List<PendingTransaction> {
     if (memories.isEmpty()) return rows
-    val matchRules = memories.values.flatMap { memory ->
-        memory.matchTerms.map { term ->
+    val matchRules = memories.flatMap { (contactName, memory) ->
+        (listOf(contactName) + memory.matchTerms).distinct().map { term ->
             Regex(
                 "(?<![\\p{L}\\p{N}])${Regex.escape(term)}(?![\\p{L}\\p{N}])",
                 RegexOption.IGNORE_CASE

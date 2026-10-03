@@ -24,6 +24,7 @@ import com.pesaflow.app.data.ledger.normalizeContact
 @Composable
 fun ContactBookScreen(
     contacts: List<ContactEntry>,
+    reprocessStatus: String? = null,
     onSave: (name: String, display: String, rel: String, cat: String, scope: String, notes: String, matchTerms: String) -> Unit,
     onDelete: (name: String) -> Unit
 ) {
@@ -52,11 +53,19 @@ fun ContactBookScreen(
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
             Text(
-                "Set a relationship and optional matching names here. Rules are applied after SMS parsing to live messages and history scans.",
+                "Set a relationship and optional matching names here. Saving a rule immediately rescans your SMS history and updates matching transaction categories.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
+            reprocessStatus?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },

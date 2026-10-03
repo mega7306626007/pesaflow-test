@@ -90,6 +90,9 @@ interface TransactionDao {
     @Query("UPDATE transactions SET confirmed = :confirmed WHERE id = :id")
     suspend fun updateConfirmation(id: String, confirmed: Boolean)
 
+    @Query("UPDATE transactions SET category = :category, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateCategory(id: String, category: String, updatedAt: Long)
+
 
     @Query("UPDATE transactions SET transferGroupId = :groupId WHERE id = :id")
     suspend fun updateTransferGroup(id: String, groupId: String?)

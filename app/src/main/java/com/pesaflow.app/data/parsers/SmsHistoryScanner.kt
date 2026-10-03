@@ -29,7 +29,8 @@ data class SmsScanResult(
     val capped: Boolean = false,
     // Honest report card: volume by month, loudest senders, read rate.
     val byMonth: Map<String, Int> = emptyMap(),
-    val topSenders: List<Pair<String, Int>> = emptyList()
+    val topSenders: List<Pair<String, Int>> = emptyList(),
+    val error: String? = null
 ) {
     private val months: Double get() = (daysBack / 30.0).coerceAtLeast(1.0 / 30)
     val monthlyIncome: Double get() = incomeTotal / months
@@ -51,7 +52,8 @@ suspend fun scanRecentSms(
     pageSize: Int = 150,
     onProgress: (found: Int, parsed: Int) -> Unit = { _, _ -> },
     isCancelled: () -> Boolean = { false },
-    sinceTimestamp: Long? = null
+    sinceTimestamp: Long? = null,
+    persistDerivedSignals: Boolean = true
 ): SmsScanResult {
     if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
         return SmsScanResult()
@@ -82,21 +84,23 @@ suspend fun scanRecentSms(
                 val addrIdx = c.getColumnIndexOrThrow("address")
                 val dateIdx = c.getColumnIndexOrThrow("date")
                 while (c.moveToNext()) {
+                    pageRows++
                     val body = c.getString(bodyIdx) ?: ""
                     val sender = try { c.getString(addrIdx) ?: "" } catch (e: Exception) { "" }
                     // Personal senders skipped silently: not candidates, not
                     // "found", not "unreadable" — they never enter the funnel.
                     if (sender.isNotBlank() && !MpesaParser.isOfficialSender(sender)) continue
                     found++
-                    pageRows++
                     val smsDate = try { c.getLong(dateIdx) } catch (e: Exception) { 0L }
                     // Sender powers bank-name patterns — dropping it blinds them.
                     // Harvest the wallet balance even from unparseable bodies.
-                    if (newestBalance == null) parseBalance(body)?.let { newestBalance = it }
+                    if (persistDerivedSignals && newestBalance == null) {
+                        parseBalance(body)?.let { newestBalance = it }
+                    }
                     // Fee bleed: harvest "Transaction cost, KSh X" tails — this
                     // month's pot only, so a 5-month scan never back-fills it.
                     val monthStart = com.pesaflow.app.data.time.monthRange(System.currentTimeMillis()).startInclusive
-                    if (smsDate >= monthStart) {
+                    if (persistDerivedSignals && smsDate >= monthStart) {
                         com.pesaflow.app.data.parsers.parseFee(body)?.let {
                             com.pesaflow.app.data.parsers.saveFee(context, it)
                         }
@@ -116,9 +120,9 @@ suspend fun scanRecentSms(
         // Full last page at the cap means older texts went unscanned.
         capped = offset >= maxRows && pageRows == pageSize
     } catch (e: SecurityException) {
-        return SmsScanResult()
+        return SmsScanResult(error = "SMS permission was revoked during the scan.")
     } catch (e: Exception) {
-        return SmsScanResult(found = found)
+        return SmsScanResult(found = found, error = e.message ?: e.javaClass.simpleName)
     }
     // Identity memory: first-scan namings resolve every later scan — a known
     // "Nancy" arrives as Nancy · Mother with the in-scope category stamped.
@@ -136,7 +140,7 @@ suspend fun scanRecentSms(
         if (financialEvents.none { row.hasRelatedSmsNotice(it) }) financialEvents.add(row)
     }
     // Wallet display: newest balance tail seen (scan order is newest-first).
-    newestBalance?.let { saveMpesaBalance(context, it) }
+    if (persistDerivedSignals) newestBalance?.let { saveMpesaBalance(context, it) }
     var income = 0.0
     var expense = 0.0
     val cats = mutableMapOf<String, Double>()
