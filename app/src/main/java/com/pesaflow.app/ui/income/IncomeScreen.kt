@@ -71,14 +71,16 @@ fun IncomeScreen(viewModel: FinanceViewModel) {
         c.timeInMillis
     }
     val todayDay = remember { java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH) }
+    val asOf = System.currentTimeMillis()
     val real = remember(transactions) { transactions.filter { !it.isSample } }
-    val mtdIn = remember(real, monthStart) {
-        real.filter { it.isEarnedIncome() && it.dateTimestamp >= monthStart }.sumOf { it.amount }
+    val observed = remember(real, asOf) { real.filter { it.dateTimestamp <= asOf } }
+    val mtdIn = remember(observed, monthStart) {
+        observed.filter { it.isEarnedIncome() && it.dateTimestamp >= monthStart }.sumOf { it.amount }
     }
     val expected = remember(sources) { sources.sumOf { IncomeSourceStore.budgetedMonthly(it) } }
     val pace = if (expected > 0) (mtdIn / expected).toFloat().coerceIn(0f, 1f) else 0f
-    val recentIn = remember(real) {
-        real.filter { it.isEarnedIncome() }.sortedByDescending { it.dateTimestamp }.take(5)
+    val recentIn = remember(observed) {
+        observed.filter { it.isEarnedIncome() }.sortedByDescending { it.dateTimestamp }.take(5)
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -162,10 +164,10 @@ fun IncomeScreen(viewModel: FinanceViewModel) {
                         )
                         // Still waiting: payday passed, nothing logged. Catches
                         // late HELB tranches and missing salary rows early.
-                        val waiting = remember(real, sources, monthStart, todayDay) {
+                        val waiting = remember(observed, sources, monthStart, todayDay) {
                             sources.filter { s ->
                                 s.label.isNotBlank() && s.dayOfMonth in 1..todayDay &&
-                                    real.none {
+                                    observed.none {
                                         it.isEarnedIncome() && it.dateTimestamp >= monthStart &&
                                             it.merchant.contains(s.label, ignoreCase = true)
                                     }
@@ -210,7 +212,7 @@ fun IncomeScreen(viewModel: FinanceViewModel) {
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
-                                        val gotMtd = if (s.label.isBlank()) -1.0 else real.filter {
+                                        val gotMtd = if (s.label.isBlank()) -1.0 else observed.filter {
                                             it.isEarnedIncome() && it.dateTimestamp >= monthStart &&
                                                 it.merchant.contains(s.label, ignoreCase = true)
                                         }.sumOf { it.amount }

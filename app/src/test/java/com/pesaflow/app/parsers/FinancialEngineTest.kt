@@ -177,7 +177,7 @@ class FinancialEngineTest {
             .copy(subcategory = "Borrowed funds")
         val repayment = tx(200.0, TransactionType.EXPENSE, "Debt", "Fuliza", ts = now + 1)
             .copy(subcategory = "Fuliza repayment")
-        val snapshot = buildSnapshot(base(txs = listOf(draw, repayment)))
+        val snapshot = buildSnapshot(base(txs = listOf(draw, repayment)).copy(nowMs = now + 2))
 
         assertEquals(Money.ZERO, snapshot.monthlyEarnedIncome)
         assertEquals(Money.of(300.0), snapshot.totalLiabilities)
@@ -192,7 +192,7 @@ class FinancialEngineTest {
             .copy(subcategory = "Ziidi transfer")
         val withdrawal = tx(300.0, TransactionType.INCOME, "Savings", "Ziidi", ts = now + 1)
             .copy(subcategory = "Ziidi transfer")
-        val snapshot = buildSnapshot(base(txs = listOf(deposit, withdrawal)))
+        val snapshot = buildSnapshot(base(txs = listOf(deposit, withdrawal)).copy(nowMs = now + 2))
 
         assertEquals(Money.ZERO, snapshot.monthlyEarnedIncome)
         assertEquals(Money.of(700.0), snapshot.accounts[com.pesaflow.app.data.finance.Account.ZIIDI])
@@ -294,6 +294,21 @@ class FinancialEngineTest {
         val s = buildSnapshot(base(txs = txs))
         assertTrue(s.forecast.favourable >= s.forecast.typical)
         assertTrue(s.forecast.typical >= s.forecast.cautious)
+    }
+
+    @Test
+    fun `future-dated ledger rows do not affect current money`() {
+        val now = System.currentTimeMillis()
+        val txs = listOf(
+            tx(5000.0, TransactionType.INCOME, "Salary", "Employer", ts = now),
+            tx(1000.0, TransactionType.EXPENSE, "Food", ts = now + 24L * 60 * 60 * 1000),
+            tx(2500.0, TransactionType.INCOME, "Gift", ts = now + 24L * 60 * 60 * 1000)
+        )
+
+        val snapshot = buildSnapshot(base(txs = txs).copy(nowMs = now))
+
+        assertEquals(Money.of(5000.0), snapshot.liquid)
+        assertEquals(Money.of(5000.0), snapshot.monthlyEarnedIncome)
     }
 
     // §9 — a bill due tomorrow reserves harder than one due in 28 days.

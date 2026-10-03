@@ -1,6 +1,7 @@
 package com.pesaflow.app.ui.transactions
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -170,14 +172,13 @@ fun TransactionsScreen(
                 )
             }
         ) { inner ->
-        if (sorted.isEmpty()) {
+        if (transactions.isEmpty()) {
             Column(Modifier.fillMaxSize().padding(inner).padding(PesaSpacing.md)) {
                 PesaEmptyState(
-                    title = if (transactions.isEmpty()) "No transactions yet" else "No matches",
-                    explanation = if (transactions.isEmpty()) "Your spending will appear here as you add transactions or import M-Pesa messages."
-                    else "Try fewer words or clear the type filter.",
-                    actionLabel = if (transactions.isEmpty()) "Add your first expense" else null,
-                    onAction = if (transactions.isEmpty()) ({ onQuickAdd(TransactionType.EXPENSE) }) else null
+                    title = "No transactions yet",
+                    explanation = "Your spending will appear here as you add transactions or import M-Pesa messages.",
+                    actionLabel = "Add your first expense",
+                    onAction = { onQuickAdd(TransactionType.EXPENSE) }
                 )
             }
         } else {
@@ -190,7 +191,10 @@ fun TransactionsScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     FilterChip(
                         selected = typeFilter == null,
                         onClick = { typeFilter = null },
@@ -205,7 +209,10 @@ fun TransactionsScreen(
                     }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     FilterChip(selected = !oldestFirst, onClick = { oldestFirst = false }, label = { Text("Newest first") })
                     FilterChip(selected = oldestFirst, onClick = { oldestFirst = true }, label = { Text("Oldest first") })
                     FilterChip(
@@ -218,7 +225,10 @@ fun TransactionsScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     FilterChip(selected = rangeDays == null, onClick = { rangeDays = null }, label = { Text("All time") })
                     FilterChip(selected = rangeDays == 0, onClick = { rangeDays = if (rangeDays == 0) null else 0 }, label = { Text("Today") })
                     FilterChip(selected = rangeDays == 7, onClick = { rangeDays = if (rangeDays == 7) null else 7 }, label = { Text("7 days") })
@@ -229,39 +239,59 @@ fun TransactionsScreen(
                 Modifier.fillMaxSize().weight(1f),
                 verticalArrangement = Arrangement.spacedBy(PesaSpacing.xs)
             ) {
-                item { Spacer(Modifier.height(PesaSpacing.xs)) }
-                groups.forEach { (day, txs) ->
-                    item(key = "h-$day") {
-                        val dayNet = txs.filter { !it.isSample }.sumOf {
-                            when (it.type) {
-                                TransactionType.INCOME -> it.amount
-                                TransactionType.EXPENSE -> -it.amount
-                                TransactionType.SAVING -> -it.amount
-                                TransactionType.INVESTMENT -> -it.amount
-                                TransactionType.TRANSFER -> 0.0
-                            }
-                        }
-                        val moved = txs.count { it.type == TransactionType.TRANSFER }
-                        PesaSectionHeader(
-                            title = groupLabel(day, now),
-                            subtitle = "${txs.size} item(s) · " + (if (dayNet >= 0) "+" else "−") + " KSh " + kotlin.math.abs(dayNet).toInt() + (if (moved > 0) " · $moved moved" else "")
-                        )
-                    }
-                    items(txs, key = { it.id }) { tx ->
-                        Box(Modifier) {
-                            TransactionRow(
-                                tx = tx,
-                                onEdit = { editingTx = tx },
-                                onDelete = { confirmDelete = tx },
-                                runningBalance = runningById[tx.id],
-                                selected = tx.id in selection,
-                                onToggleSelect = if (selecting) ({
-                                    selection = if (tx.id in selection) selection - tx.id else selection + tx.id
-                                }) else null
+                if (sorted.isEmpty()) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                            PesaEmptyState(
+                                title = "No matching transactions",
+                                explanation = "Change your search or filters, or clear them to see your full history.",
+                                actionLabel = "Clear search and filters",
+                                onAction = {
+                                    merchantQuery = ""
+                                    typeFilter = null
+                                    rangeDays = null
+                                    oldestFirst = false
+                                    selecting = false
+                                    selection = emptySet()
+                                }
                             )
                         }
                     }
-                    item { Spacer(Modifier.height(PesaSpacing.sm)) }
+                } else {
+                    item { Spacer(Modifier.height(PesaSpacing.xs)) }
+                    groups.forEach { (day, txs) ->
+                        item(key = "h-$day") {
+                            val dayNet = txs.filter { !it.isSample }.sumOf {
+                                when (it.type) {
+                                    TransactionType.INCOME -> it.amount
+                                    TransactionType.EXPENSE -> -it.amount
+                                    TransactionType.SAVING -> -it.amount
+                                    TransactionType.INVESTMENT -> -it.amount
+                                    TransactionType.TRANSFER -> 0.0
+                                }
+                            }
+                            val moved = txs.count { it.type == TransactionType.TRANSFER }
+                            PesaSectionHeader(
+                                title = groupLabel(day, now),
+                                subtitle = "${txs.size} item(s) · " + (if (dayNet >= 0) "+" else "−") + " KSh " + kotlin.math.abs(dayNet).toInt() + (if (moved > 0) " · $moved moved" else "")
+                            )
+                        }
+                        items(txs, key = { it.id }) { tx ->
+                            Box(Modifier) {
+                                TransactionRow(
+                                    tx = tx,
+                                    onEdit = { editingTx = tx },
+                                    onDelete = { confirmDelete = tx },
+                                    runningBalance = runningById[tx.id],
+                                    selected = tx.id in selection,
+                                    onToggleSelect = if (selecting) ({
+                                        selection = if (tx.id in selection) selection - tx.id else selection + tx.id
+                                    }) else null
+                                )
+                            }
+                        }
+                        item { Spacer(Modifier.height(PesaSpacing.sm)) }
+                    }
                 }
                 item { Spacer(Modifier.height(80.dp)) }
             }

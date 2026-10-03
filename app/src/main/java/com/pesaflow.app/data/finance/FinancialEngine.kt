@@ -83,7 +83,7 @@ internal fun daysLeftInMonth(nowMs: Long): Int {
 
 fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
     val now = input.nowMs
-    val real = input.txs.filter { !it.isSample }
+    val real = input.txs.filter { !it.isSample && it.dateTimestamp <= now }
     val flows = real.filter { it.type != TransactionType.TRANSFER }
     val (monthStart, _) = monthBounds(now)
 

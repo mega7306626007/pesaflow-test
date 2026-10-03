@@ -69,6 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pesaflow.app.R
@@ -502,48 +503,84 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
 
 @Composable
 private fun MoreScreen(onSelect: (String) -> Unit) {
+    data class Entry(
+        val section: String,
+        val icon: ImageVector,
+        val title: String,
+        val subtitle: String,
+        val route: String
+    )
+    val entries = listOf(
+        Entry("Money", Icons.Filled.Menu, "Analytics", "Category trends, comparisons and heatmaps", NavRoutes.ANALYTICS),
+        Entry("Money", Icons.Filled.DateRange, "Reports", "Daily, weekly, monthly and annual summaries", NavRoutes.REPORTS),
+        Entry("Money", Icons.Filled.AccountBalance, "Net Worth", "Cash, savings, investments and debts", NavRoutes.NETWORTH),
+        Entry("Money", Icons.Filled.AccountBalanceWallet, "Income", "Track money sources and expected payments", NavRoutes.INCOME),
+        Entry("Money", Icons.Filled.Search, "Search", "Find a transaction by merchant or category", NavRoutes.SEARCH),
+        Entry("Planning", Icons.Filled.Home, "Bills", "Due dates, recurring bills and payer details", NavRoutes.BILLS),
+        Entry("Planning", Icons.Filled.AccountBox, "Debt Tracking", "Money owed, borrowed and repaid", NavRoutes.DEBT),
+        Entry("Planning", Icons.Filled.Savings, "Savings", "Savings goals and progress", NavRoutes.SAVINGS),
+        Entry("Planning", Icons.Filled.Star, "Goal Planner", "Goal pace, risk and suggestions", NavRoutes.GOALS),
+        Entry("Planning", Icons.Filled.DateRange, "Recurring", "Spending patterns and monthly commitments", NavRoutes.RECURRING),
+        Entry("Student life", Icons.Filled.DateRange, "Semester", "Term plan, runway and fees", NavRoutes.SEMESTER),
+        Entry("Student life", Icons.Filled.Favorite, "Meal Planner", "Plan meals with your food budget", NavRoutes.MEALS),
+        Entry("Student life", Icons.Filled.DateRange, "Kitchen Stock", "Track staple quantities and refill needs", NavRoutes.KITCHEN),
+        Entry("Student life", Icons.Filled.ShoppingCart, "My Things", "Track what you own and still need", NavRoutes.THINGS),
+        Entry("Student life", Icons.Filled.Star, "University", "Campus, timetable and allowance planning", NavRoutes.UNIVERSITY),
+        Entry("Tools", Icons.Filled.Star, "Export & Backup", "Export transactions or back up your data", NavRoutes.EXPORT),
+        Entry("Tools", Icons.Filled.Person, "Contact Book", "Remember people and categorize transactions", NavRoutes.CONTACTS),
+        Entry("Tools", Icons.Filled.CheckCircle, "Weekly review", "Review uncategorized items and duplicates", NavRoutes.REVIEW),
+        Entry("App", Icons.Filled.Face, "PesaBuddy", "Ask questions about your saved money data", NavRoutes.BUDDY),
+        Entry("App", Icons.Filled.Favorite, "Notifications", "Configure reminders and financial alerts", NavRoutes.NOTIFICATIONS),
+        Entry("App", Icons.Filled.Settings, "Settings", "Language, appearance, notifications and data", NavRoutes.SETTINGS)
+    )
+    var featureQuery by remember { mutableStateOf("") }
+    val query = featureQuery.trim()
+    val filtered = entries.filter {
+        query.isBlank() || it.title.contains(query, ignoreCase = true) ||
+            it.subtitle.contains(query, ignoreCase = true) ||
+            it.section.contains(query, ignoreCase = true)
+    }
     Box(Modifier.fillMaxSize()) {
         CinematicBackdrop(workspaceTint = TintSettingsNeutral, bgRes = R.drawable.bg_settings_neutral)
-    Column(
-        modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("More features", style = com.pesaflow.app.ui.theme.ppTypography.h1, color = com.pesaflow.app.ui.theme.ppColors.textPrimary)
-        Text("Everything else, one tap away", style = com.pesaflow.app.ui.theme.ppTypography.bodyMedium, color = com.pesaflow.app.ui.theme.ppColors.textTertiary)
-
-        MoreSection("Money") {
-            MoreRow(icon = Icons.Filled.Info, title = "Insights", subtitle = "Charts, trends and advice") { onSelect(NavRoutes.INSIGHTS) }
-            MoreRow(icon = Icons.Filled.Menu, title = "Analytics", subtitle = "Trends, shares, heatmap and insights") { onSelect(NavRoutes.ANALYTICS) }
-            MoreRow(icon = Icons.Filled.DateRange, title = "Reports", subtitle = "Daily to annual summaries") { onSelect(NavRoutes.REPORTS) }
-            MoreRow(icon = Icons.Filled.AccountBalance, title = "Net Worth", subtitle = "Cash, savings, investments, debts") { onSelect(NavRoutes.NETWORTH) }
-            MoreRow(icon = Icons.Filled.Search, title = "Search", subtitle = "Find any transaction") { onSelect(NavRoutes.SEARCH) }
-        }
-        MoreSection("Plan") {
-            MoreRow(icon = Icons.Filled.ShoppingCart, title = "Budgets", subtitle = "Envelopes and progress") { onSelect(NavRoutes.BUDGETS) }
-            MoreRow(icon = Icons.Filled.Home, title = "Bills", subtitle = "Upcoming, recurring, repeats") { onSelect(NavRoutes.BILLS) }
-            MoreRow(icon = Icons.Filled.AccountBox, title = "Debt Tracking", subtitle = "Money owed and borrowed") { onSelect(NavRoutes.DEBT) }
-            MoreRow(icon = Icons.Filled.Savings, title = "Savings", subtitle = "Goals that grow with your ledger") { onSelect(NavRoutes.SAVINGS) }
-            MoreRow(icon = Icons.Filled.Savings, title = "Goals Pro", subtitle = "Pace, risk and suggestions") { onSelect(NavRoutes.GOALS) }
-            MoreRow(icon = Icons.Filled.DateRange, title = "Recurring", subtitle = "Patterns and monthly commitment") { onSelect(NavRoutes.RECURRING) }
-            MoreRow(icon = Icons.Filled.DateRange, title = "Semester", subtitle = "Semester plan, runway and fees") { onSelect(NavRoutes.SEMESTER) }
-            MoreRow(icon = Icons.Filled.Favorite, title = "Meal Planner", subtitle = "Food menus under your budget") { onSelect(NavRoutes.MEALS) }
-            MoreRow(icon = Icons.Filled.DateRange, title = "Kitchen Stock", subtitle = "Unga levels, refills, restock cost") { onSelect(NavRoutes.KITCHEN) }
-            MoreRow(icon = Icons.Filled.ShoppingCart, title = "My Things", subtitle = "Have it, need it, save for it") { onSelect(NavRoutes.THINGS) }
-        }
-        MoreSection("Data") {
-            MoreRow(icon = Icons.Filled.Star, title = "Export & Backup", subtitle = "CSV, JSON backup and share") { onSelect(NavRoutes.EXPORT) }
-            MoreRow(icon = Icons.Filled.Person, title = "Contact Book", subtitle = "Label people — friend, landlord, boss") { onSelect(NavRoutes.CONTACTS) }
-            MoreRow(icon = Icons.Filled.CheckCircle, title = "Weekly review", subtitle = "Uncategorized and possible duplicates") { onSelect(NavRoutes.REVIEW) }
-        }
-        MoreSection("App") {
-            MoreRow(icon = Icons.Filled.Face, title = "PesaBuddy", subtitle = "Ask about your money") { onSelect(NavRoutes.BUDDY) }
-            MoreRow(icon = Icons.Filled.Star, title = "University", subtitle = "Semester planner and allowance") { onSelect(NavRoutes.UNIVERSITY) }
-            MoreRow(icon = Icons.Filled.Favorite, title = "Notifications", subtitle = "Bills, debts, budgets and rituals") { onSelect(NavRoutes.NOTIFICATIONS) }
-            MoreRow(icon = Icons.Filled.Settings, title = "Settings", subtitle = "Language, notifications, data") { onSelect(NavRoutes.SETTINGS) }
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("More features", style = com.pesaflow.app.ui.theme.ppTypography.h1, color = com.pesaflow.app.ui.theme.ppColors.textPrimary)
+            Text("Find student tools and account settings", style = com.pesaflow.app.ui.theme.ppTypography.bodyMedium, color = com.pesaflow.app.ui.theme.ppColors.textTertiary)
+            androidx.compose.material3.OutlinedTextField(
+                value = featureQuery,
+                onValueChange = { featureQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Search features") },
+                trailingIcon = if (featureQuery.isNotBlank()) {
+                    {
+                        TextButton(onClick = { featureQuery = "" }) { Text("Clear") }
+                    }
+                } else null
+            )
+            if (filtered.isEmpty()) {
+                androidx.compose.material3.Card(
+                    colors = CardDefaults.cardColors(containerColor = com.pesaflow.app.ui.theme.ppColors.surface)
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("No features found", fontWeight = FontWeight.SemiBold)
+                        Text("Try another search, or clear the search to browse all tools.")
+                    }
+                }
+            } else {
+                filtered.groupBy { it.section }.forEach { (section, sectionEntries) ->
+                    MoreSection(section) {
+                        sectionEntries.forEach { entry ->
+                            MoreRow(entry.icon, entry.title, entry.subtitle) { onSelect(entry.route) }
+                        }
+                    }
+                }
+            }
         }
     }
-}
-
 }
 
 @Composable
@@ -563,7 +600,7 @@ private fun MoreSection(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun MoreRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick),
         shape = com.pesaflow.app.ui.theme.ppShapes.cardCompact,
         colors = CardDefaults.cardColors(containerColor = com.pesaflow.app.ui.theme.ppColors.surface),
         border = androidx.compose.foundation.BorderStroke(1.dp, com.pesaflow.app.ui.theme.ppColors.border)
@@ -593,7 +630,7 @@ private fun MoreRow(icon: ImageVector, title: String, subtitle: String, onClick:
                 ) {
                     Icon(
                         icon,
-                        contentDescription = title,
+                        contentDescription = null,
                         tint = com.pesaflow.app.ui.theme.ppColors.brightBlue,
                         modifier = Modifier.size(20.dp)
                     )

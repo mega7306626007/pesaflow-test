@@ -35,6 +35,17 @@ class SmartInsightsEngineTest {
         return c.timeInMillis
     }
 
+    private fun monthEndTs(monthOffset: Int, day: Int): Long {
+        val c = java.util.Calendar.getInstance()
+        c.add(java.util.Calendar.MONTH, monthOffset)
+        c.set(java.util.Calendar.DAY_OF_MONTH, minOf(day, c.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)))
+        c.set(java.util.Calendar.HOUR_OF_DAY, 23)
+        c.set(java.util.Calendar.MINUTE, 59)
+        c.set(java.util.Calendar.SECOND, 59)
+        c.set(java.util.Calendar.MILLISECOND, 999)
+        return c.timeInMillis
+    }
+
     private fun txAt(amount: Double, type: TransactionType, category: String, ts: Long) = Transaction(
         amount = amount,
         type = type,
@@ -61,7 +72,9 @@ class SmartInsightsEngineTest {
             tx(2000.0, TransactionType.EXPENSE, "Transport"),
             tx(1000.0, TransactionType.EXPENSE, "Airtime")
         )
-        val out = buildInsights(txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList())
+        val out = buildInsights(
+            txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList()
+        )
         assertTrue(out.none { it.contains("Danger") })
     }
 
@@ -72,7 +85,10 @@ class SmartInsightsEngineTest {
             txAt(5000.0, TransactionType.EXPENSE, "Food", monthTs(0, today)),
             txAt(12.0, TransactionType.EXPENSE, "Food", monthTs(-1, today))
         )
-        val out = buildInsights(txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList())
+        val out = buildInsights(
+            txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList(),
+            asOfTimestamp = monthEndTs(0, today)
+        )
         val mom = out.first { it.contains("last month") }
         assertTrue(mom.contains("vs KSh"))
         assertFalse(mom.contains("%"))
@@ -102,7 +118,10 @@ class SmartInsightsEngineTest {
             txAt(50.0, TransactionType.EXPENSE, "Food", previous),
             txAt(if (laterDay <= previousMonthMax) 20_000.0 else 0.0, TransactionType.EXPENSE, "Food", beyondMonthToDate)
         )
-        val comparison = buildInsights(txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList())
+        val comparison = buildInsights(
+            txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList(),
+            asOfTimestamp = monthEndTs(0, today)
+        )
             .first { it.contains("same days last month") }
         assertTrue(comparison, comparison.contains("KSh 50 month-to-date vs KSh 50"))
     }
@@ -115,10 +134,14 @@ class SmartInsightsEngineTest {
         )
         val watched = buildInsights(
             txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList(),
-            watched = setOf("food")
+            watched = setOf("food"),
+            asOfTimestamp = monthEndTs(0, 10)
         )
         assertTrue(watched.any { it.contains("Watching food") && it.contains("KSh 800") })
-        val unwatched = buildInsights(txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList())
+        val unwatched = buildInsights(
+            txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList(),
+            asOfTimestamp = monthEndTs(0, 10)
+        )
         assertTrue(unwatched.none { it.contains("Watching") })
     }
 
@@ -128,7 +151,10 @@ class SmartInsightsEngineTest {
             txAt(4000.0, TransactionType.EXPENSE, "Other", monthTs(0, 5)),
             txAt(500.0, TransactionType.EXPENSE, "Transport", monthTs(0, 6))
         )
-        val out = buildInsights(txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList())
+        val out = buildInsights(
+            txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList(),
+            asOfTimestamp = monthEndTs(0, 10)
+        )
         assertTrue(out.any { it.contains("uncategorized") })
     }
 
@@ -147,6 +173,29 @@ class SmartInsightsEngineTest {
         )
         val out = buildInsights(txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList())
         assertTrue(out.any { it.contains("Food") })
+    }
+
+    @Test
+    fun `future-dated spending is excluded from month-to-date insights`() {
+        val now = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.DAY_OF_MONTH, 10)
+            set(java.util.Calendar.HOUR_OF_DAY, 12)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val txs = listOf(
+            txAt(500.0, TransactionType.EXPENSE, "Food", now.timeInMillis),
+            txAt(100_000.0, TransactionType.EXPENSE, "Shopping", monthTs(0, 20))
+        )
+
+        val out = buildInsights(
+            txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList(),
+            asOfTimestamp = now.timeInMillis
+        )
+
+        assertTrue(out.any { it.contains("Most spending: Food — KSh 500 (100%).") })
+        assertTrue(out.none { it.contains("Most spending: Shopping") })
     }
 
     @Test

@@ -22,7 +22,8 @@ fun dailyPaces(
 ): PaceStats {
     val daily = txs.filter {
         it.type == TransactionType.EXPENSE && !it.isSample &&
-            it.dateTimestamp >= nowMs - windowDays * FC_DAY_MS
+            it.dateTimestamp >= nowMs - windowDays * FC_DAY_MS &&
+            it.dateTimestamp <= nowMs
     }.groupBy { it.dateTimestamp / FC_DAY_MS }
         .mapValues { (_, l) -> l.sumOf { it.amount } }.values.toList()
     val typical = median(daily)

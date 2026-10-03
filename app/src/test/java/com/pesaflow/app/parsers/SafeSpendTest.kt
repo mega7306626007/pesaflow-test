@@ -71,7 +71,7 @@ class SafeSpendTest {
         val paydays = (0..3).map { back ->
             val c = (cal.clone() as Calendar).apply {
                 add(Calendar.MONTH, -back)
-                set(Calendar.DAY_OF_MONTH, 5)
+                set(Calendar.DAY_OF_MONTH, if (back == 0) minOf(5, get(Calendar.DAY_OF_MONTH)) else 5)
             }
             tx(20000.0, TransactionType.INCOME, "Salary", "Employer", daysAgo = (now - c.timeInMillis) / day)
         }

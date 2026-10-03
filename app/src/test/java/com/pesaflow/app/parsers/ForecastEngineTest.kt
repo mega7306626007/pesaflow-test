@@ -42,6 +42,18 @@ class ForecastEngineTest {
     }
 
     @Test
+    fun `future expenses do not distort observed daily pace`() {
+        val now = System.currentTimeMillis()
+        val p = dailyPaces(
+            listOf(expense(250.0, 0), expense(20_000.0, -1)),
+            nowMs = now
+        )
+
+        assertEquals(1, p.activeDays)
+        assertEquals(250.0, p.typical, 0.0)
+    }
+
+    @Test
     fun `projection subtracts pace bills from flexible`() {
         val end = projectMonthEnd(Money.of(10000.0), 500.0, Money.ZERO, Money.of(1000.0), 10)
         assertEquals(Money.of(4000.0), end)

@@ -803,7 +803,11 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     set(java.util.Calendar.SECOND, 0)
                     set(java.util.Calendar.MILLISECOND, 0)
                 }.timeInMillis
-                val foodSpentMonth = ledgerTxns.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.category == "Food" && it.dateTimestamp >= monthStartCal }.sumOf { it.amount }
+                val foodSpentMonth = ledgerTxns.filter {
+                    it.type == TransactionType.EXPENSE && !it.isSample &&
+                        it.category == "Food" && it.dateTimestamp >= monthStartCal &&
+                        it.dateTimestamp <= System.currentTimeMillis()
+                }.sumOf { it.amount }
                 val foodLeft = (foodBudget - foodSpentMonth).coerceAtLeast(0.0)
                 LinkOptionCard(
                     skin = SkinMeals,

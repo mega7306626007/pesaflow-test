@@ -279,12 +279,20 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     // cash, never monthly earnings — counting them here inflated "this month"
     // every onboarding month.
     val monthlyIncome: StateFlow<Double> = allTransactions.map { txs ->
-        txs.filter { it.isEarnedIncome() && !it.isSample && isCurrentMonth(it.dateTimestamp) }.sumOf { it.amount }
+        val now = System.currentTimeMillis()
+        txs.filter {
+            it.isEarnedIncome() && !it.isSample &&
+                it.dateTimestamp <= now && isCurrentMonth(it.dateTimestamp)
+        }.sumOf { it.amount }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 
     val monthlyExpenses: StateFlow<Double> = allTransactions.map { txs ->
-        txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && isCurrentMonth(it.dateTimestamp) }.sumOf { it.amount}
+        val now = System.currentTimeMillis()
+        txs.filter {
+            it.type == TransactionType.EXPENSE && !it.isSample &&
+                it.dateTimestamp <= now && isCurrentMonth(it.dateTimestamp)
+        }.sumOf { it.amount }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 

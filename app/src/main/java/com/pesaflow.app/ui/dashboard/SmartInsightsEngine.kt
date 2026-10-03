@@ -51,7 +51,7 @@ internal fun ord(day: Int): String = when {
 }
 
 internal fun buildInsights(
-    txs: List<Transaction>,
+    transactions: List<Transaction>,
 
     budgets: List<Budget>,
     lang: AppLanguage,
@@ -73,7 +73,8 @@ hustleLanded: Double = 0.0,
 // against it, naming the dry date when one exists.
 heldBalance: Double = 0.0,
 // Pinned watchlist categories: report first, budget or not.
-watched: Set<String> = emptySet()
+watched: Set<String> = emptySet(),
+asOfTimestamp: Long = System.currentTimeMillis()
 ): List<String> {
     fun t(en: String, sh: String, sw: String, mix: String): String =
         when (lang) {
@@ -83,6 +84,7 @@ watched: Set<String> = emptySet()
             else -> en
         }
     val nn = if (name.isNotBlank()) "$name, " else ""
+    val txs = transactions.filter { it.dateTimestamp <= asOfTimestamp }
     if (txs.isEmpty()) return listOf(t(
         "Add transactions and I'll spot patterns. 👀",
         "Weka transactions ni-spot patterns. 👀",
@@ -90,18 +92,24 @@ watched: Set<String> = emptySet()
         "Weka transactions ni-spot patterns. 👀"
     ))
     val out = mutableListOf<String>()
-    val cal = Calendar.getInstance()
+    val cal = Calendar.getInstance().apply { timeInMillis = asOfTimestamp }
     fun inMonth(ts: Long, offset: Int = 0): Boolean {
         val ref = (cal.clone() as Calendar).apply { add(Calendar.MONTH, offset) }
         val c = Calendar.getInstance().apply { timeInMillis = ts }
         return c.get(Calendar.YEAR) == ref.get(Calendar.YEAR) &&
             c.get(Calendar.MONTH) == ref.get(Calendar.MONTH)
     }
-    val monthExp = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && inMonth(it.dateTimestamp) }
+    val monthExp = txs.filter {
+        it.type == TransactionType.EXPENSE && !it.isSample &&
+            it.dateTimestamp <= asOfTimestamp && inMonth(it.dateTimestamp)
+    }
     val monthTotal = monthExp.sumOf { it.amount }
     // Earned income only — onboarding opening rows are held cash, and counting
     // them here broke the overspend alarm + savings rate every onboarding month.
-    val monthIncome = txs.filter { it.isEarnedIncome() && !it.isSample && inMonth(it.dateTimestamp) }.sumOf { it.amount }
+    val monthIncome = txs.filter {
+        it.isEarnedIncome() && !it.isSample &&
+            it.dateTimestamp <= asOfTimestamp && inMonth(it.dateTimestamp)
+    }.sumOf { it.amount }
     if (monthTotal <= 0) return listOf(t(
         "No spending this month yet.",
         "Hujaspend this month.",
