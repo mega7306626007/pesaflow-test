@@ -12,15 +12,18 @@ import java.util.Calendar
 // flags demo rows with isSample instead of an OPENING source, and books
 // opening upkeep as real INCOME, so statistics exclude samples only.)
 
-fun ledgerBalance(txs: List<Transaction>): Double = txs.sumOf {
-    when (it.type) {
-        TransactionType.INCOME -> it.amount
-        TransactionType.EXPENSE -> -it.amount
-        TransactionType.SAVING -> -it.amount
-        TransactionType.INVESTMENT -> -it.amount
-        TransactionType.TRANSFER -> 0.0
+fun ledgerBalance(txs: List<Transaction>, nowMs: Long = System.currentTimeMillis()): Double = txs
+    .asSequence()
+    .filter { !it.isSample && it.dateTimestamp <= nowMs }
+    .sumOf {
+        when (it.type) {
+            TransactionType.INCOME -> it.amount
+            TransactionType.EXPENSE -> -it.amount
+            TransactionType.SAVING -> -it.amount
+            TransactionType.INVESTMENT -> -it.amount
+            TransactionType.TRANSFER -> 0.0
+        }
     }
-}
 
 // Ziidi holding: top-ups in as SAVING, withdrawals back as INCOME (both
 // merchant "Ziidi"). Never negative — a ledger can't over-withdraw. The hero
@@ -48,8 +51,12 @@ private fun pocketAccounts(method: PaymentMethod): Set<String> = when (method) {
     else -> setOf(method.name)
 }
 
-fun pocketBalance(txs: List<Transaction>, method: PaymentMethod): Double =
-    txs.filter { !it.isSample }.sumOf { tx ->
+fun pocketBalance(
+    txs: List<Transaction>,
+    method: PaymentMethod,
+    nowMs: Long = System.currentTimeMillis()
+): Double =
+    txs.asSequence().filter { !it.isSample && it.dateTimestamp <= nowMs }.sumOf { tx ->
         when {
             tx.type == TransactionType.TRANSFER && tx.transferSide == "OUT" &&
                 tx.accountKind.uppercase() in pocketAccounts(method) -> -tx.amount
@@ -85,6 +92,7 @@ fun monthScopedTotal(
     it.type == type &&
         (!excludeSamples || !it.isSample) &&
         (type != TransactionType.INCOME || !it.isOpening) &&
+        it.dateTimestamp <= nowMs &&
         isCurrentMonth(it.dateTimestamp, nowMs)
 }.sumOf { it.amount }
 

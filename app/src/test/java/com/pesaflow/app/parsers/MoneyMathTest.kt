@@ -127,4 +127,46 @@ class MoneyMathTest {
             0.001
         )
     }
+
+    @Test
+    fun `ledger and pocket balances exclude samples and future entries`() {
+        val now = 1_000_000L
+        val rows = listOf(
+            Transaction(
+                amount = 5000.0, type = TransactionType.INCOME,
+                category = "Income", dateTimestamp = now - 1, merchant = "Opening",
+                paymentMethod = com.pesaflow.app.data.models.PaymentMethod.MPESA
+            ),
+            Transaction(
+                amount = 2000.0, type = TransactionType.EXPENSE,
+                category = "Food", dateTimestamp = now - 1, merchant = "Groceries",
+                paymentMethod = com.pesaflow.app.data.models.PaymentMethod.MPESA
+            ),
+            Transaction(
+                amount = 200000.0, type = TransactionType.EXPENSE,
+                category = "Bills", dateTimestamp = now + 1, merchant = "Future bill",
+                paymentMethod = com.pesaflow.app.data.models.PaymentMethod.MPESA
+            ),
+            Transaction(
+                amount = 900000.0, type = TransactionType.EXPENSE,
+                category = "Food", dateTimestamp = now - 1, merchant = "Sample",
+                paymentMethod = com.pesaflow.app.data.models.PaymentMethod.MPESA,
+                isSample = true
+            )
+        )
+
+        assertEquals(3000.0, ledgerBalance(rows, now), 0.001)
+        assertEquals(
+            3000.0,
+            com.pesaflow.app.data.money.pocketBalance(
+                rows, com.pesaflow.app.data.models.PaymentMethod.MPESA, now
+            ),
+            0.001
+        )
+        assertEquals(
+            2000.0,
+            com.pesaflow.app.data.money.monthScopedTotal(rows, TransactionType.EXPENSE, now),
+            0.001
+        )
+    }
 }

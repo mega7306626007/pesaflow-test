@@ -43,18 +43,43 @@ fun budgetWindowRange(
     }
 }
 
+// Budget active window: stored [startTimestamp, endTimestamp] goes stale the
+// month after creation. Readers that need "the current cap" must prefer rows
+// covering now. end<=0 means legacy open-ended (no expiry stamped).
+fun isBudgetActive(b: Budget, nowMs: Long): Boolean {
+    if (b.limitAmount <= 0.0) return false
+    if (b.startTimestamp > nowMs) return false
+    if (b.endTimestamp <= 0L) return true
+    return b.endTimestamp >= nowMs
+}
+
 // Master-envelope precedence: the ALL envelope IS the period target when set
 // (categories are its breakdown, not extra money). Without ALL, the category
 // sum stands in. Summing both double-counts the wallet — tiny phantom
 // percentages like "4% of 70k". Same rule FinancialEngine uses for daily
 // pace; every new budget surface must call this. Pure, unit-tested.
-fun masterOrCategoryTotal(budgets: List<Budget>, type: BudgetType): Double {
+//
+// Active-first: rows covering nowMs win; when none cover now (legacy rows
+// with start=0/end=0 or stale test fixtures) fall back to all rows so old
+// data still reads. Multiple ALL rows pick latest start (update-in-place),
+// never summed.
+fun masterOrCategoryTotal(
+    budgets: List<Budget>,
+    type: BudgetType,
+    nowMs: Long = System.currentTimeMillis()
+): Double {
     val scoped = budgets.filter { it.type == type && it.limitAmount > 0 }
-    val master = scoped
+    if (scoped.isEmpty()) return 0.0
+    val active = scoped.filter { isBudgetActive(it, nowMs) }
+    val pool = if (active.isNotEmpty()) active else scoped
+    // Latest row per category wins (upsert semantics — no stacking).
+    val latest = pool.groupBy { it.category.trim().uppercase() }
+        .values.mapNotNull { rows -> rows.maxByOrNull { it.startTimestamp } }
+    val master = latest
         .filter { it.category.equals("ALL", ignoreCase = true) }
-        .sumOf { it.limitAmount }
-    if (master > 0) return master
-    return scoped
+        .maxByOrNull { it.startTimestamp }
+    if (master != null) return master.limitAmount
+    return latest
         .filter { !it.category.equals("ALL", ignoreCase = true) }
         .sumOf { it.limitAmount }
 }

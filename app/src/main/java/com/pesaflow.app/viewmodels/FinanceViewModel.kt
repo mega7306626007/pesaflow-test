@@ -281,36 +281,28 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
 
     // Computed metrics
-    val availableBalance: StateFlow<Double> = allTransactions.map { txs ->
-        txs.filter { !it.isSample }.sumOf {
-            when (it.type) {
-                TransactionType.INCOME -> it.amount
-                TransactionType.EXPENSE -> -it.amount
-                TransactionType.SAVING -> -it.amount
-                TransactionType.INVESTMENT -> -it.amount
-                TransactionType.TRANSFER -> 0.0
-            }
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    val availableBalance: StateFlow<Double> = financialSnapshot
+        .map { it.liquid.toDouble() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 
     // Per-pocket balances: the pooled number hides which pocket holds the
     // money. M-Pesa wallet vs cash in hand vs bank, samples excluded, paired
     // transfer legs counted per side (a bank move used to vanish from every
     // pocket). Same helper the tests pin — one rule, both places.
-    val mpesaBalance: StateFlow<Double> = allTransactions.map { txs ->
-        com.pesaflow.app.data.money.pocketBalance(txs, PaymentMethod.MPESA)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    val mpesaBalance: StateFlow<Double> = financialSnapshot
+        .map { it.accounts.getValue(com.pesaflow.app.data.finance.Account.M_PESA).toDouble() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 
-    val cashBalance: StateFlow<Double> = allTransactions.map { txs ->
-        com.pesaflow.app.data.money.pocketBalance(txs, PaymentMethod.CASH)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    val cashBalance: StateFlow<Double> = financialSnapshot
+        .map { it.accounts.getValue(com.pesaflow.app.data.finance.Account.CASH).toDouble() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 
-    val bankBalance: StateFlow<Double> = allTransactions.map { txs ->
-        com.pesaflow.app.data.money.pocketBalance(txs, PaymentMethod.BANK_TRANSFER)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    val bankBalance: StateFlow<Double> = financialSnapshot
+        .map { it.accounts.getValue(com.pesaflow.app.data.finance.Account.BANK).toDouble() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
 
     // 1-tap drift reconcile: books the ledger-vs-SMS gap as a labeled M-Pesa

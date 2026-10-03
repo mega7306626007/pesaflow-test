@@ -283,12 +283,11 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
     // says SPARSE instead of inventing a number.
     val paces = dailyPaces(flows, now)
     val burn = paces.typical
-    val monthlyBudgets = input.budgets.filter { it.type == BudgetType.MONTHLY && it.limitAmount > 0 }
-    val declaredDaily = run {
-        val master = monthlyBudgets.firstOrNull { it.category.equals("ALL", ignoreCase = true) }?.limitAmount
-        if (master != null && master > 0) master / 30.0
-        else monthlyBudgets.sumOf { it.limitAmount } / 30.0
-    }
+    // Declared daily shares one rule with every budget surface
+    // (masterOrCategoryTotal: latest active ALL wins, else active category
+    // sum). firstOrNull froze the oldest ALL forever — expired rows kept
+    // capping the hero figure.
+    val declaredDaily = masterOrCategoryTotal(input.budgets, BudgetType.MONTHLY, now) / 30.0
     val needsDaily = maxOf(burn, declaredDaily)
 
     // Horizons (§11, §26): each figure states its own window. Primary horizon

@@ -2,12 +2,66 @@ package com.pesaflow.app.parsers
 
 import com.pesaflow.app.ui.dashboard.buddySafeDaily
 import com.pesaflow.app.ui.dashboard.safeDayFigure
+import com.pesaflow.app.ui.dashboard.safeSpendBudgetLimits
+import com.pesaflow.app.data.models.Budget
+import com.pesaflow.app.data.models.BudgetType
 import org.junit.Assert.*
 import org.junit.Test
 
 
 /** Safe-to-spend day math breathes with data and the calendar. */
 class SafeSpendMathTest {
+
+    @Test
+    fun `safe spend respects budget period and master envelope`() {
+        fun budget(category: String, amount: Double, type: BudgetType, start: Long = 0L) = Budget(
+            category = category,
+            limitAmount = amount,
+            type = type,
+            startTimestamp = start,
+            endTimestamp = Long.MAX_VALUE
+        )
+        val limits = safeSpendBudgetLimits(
+            listOf(
+                budget("ALL", 6000.0, BudgetType.DAILY),
+                budget("ALL", 21000.0, BudgetType.WEEKLY),
+                budget("ALL", 60000.0, BudgetType.MONTHLY),
+                budget("Food", 5000.0, BudgetType.DAILY),
+                budget("Transport", 2000.0, BudgetType.DAILY)
+            )
+        )
+
+        assertEquals(60000.0, limits.monthly!!, 0.001)
+        assertEquals(6000.0, limits.daily!!, 0.001)
+        assertEquals(21000.0, limits.weekly!!, 0.001)
+    }
+
+    @Test
+    fun `category budgets add only when no master envelope exists`() {
+        val limits = safeSpendBudgetLimits(
+            listOf(
+                Budget(category = "Food", limitAmount = 1200.0, type = BudgetType.DAILY, startTimestamp = 1L, endTimestamp = 2L),
+                Budget(category = "Transport", limitAmount = 300.0, type = BudgetType.DAILY, startTimestamp = 1L, endTimestamp = 2L)
+            )
+        )
+
+        assertEquals(1500.0, limits.daily!!, 0.001)
+        assertNull(limits.monthly)
+        assertNull(limits.weekly)
+    }
+
+    @Test
+    fun `duplicate category budgets use newest value instead of double counting`() {
+        val limits = safeSpendBudgetLimits(
+            listOf(
+                Budget(category = "Food", limitAmount = 1200.0, type = BudgetType.DAILY, startTimestamp = 1L, endTimestamp = 2L),
+                Budget(category = "Food", limitAmount = 1500.0, type = BudgetType.DAILY, startTimestamp = 3L, endTimestamp = 4L),
+                Budget(category = "Transport", limitAmount = 300.0, type = BudgetType.DAILY, startTimestamp = 1L, endTimestamp = 2L)
+            )
+        )
+
+        assertEquals(1800.0, limits.daily!!, 0.001)
+    }
 
     @Test
     fun `late month divides by days left not thirty`() {

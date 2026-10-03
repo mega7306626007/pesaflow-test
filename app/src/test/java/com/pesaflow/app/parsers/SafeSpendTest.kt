@@ -157,4 +157,15 @@ class SafeSpendTest {
         assertEquals(316, com.pesaflow.app.ui.dashboard.reserveBillDaily(bills, now))
         assertEquals(0, com.pesaflow.app.ui.dashboard.reserveBillDaily(emptyList(), now))
     }
+
+    @Test
+    fun `bill reserve uses remaining amount after partial payment`() {
+        val now = System.currentTimeMillis()
+        val partiallyPaid = com.pesaflow.app.data.models.Bill(
+            name = "Rent", amount = 8000.0, amountRemaining = 3000.0,
+            dueDate = now + 5 * day, category = "Rent"
+        )
+
+        assertEquals(100, com.pesaflow.app.ui.dashboard.reserveBillDaily(listOf(partiallyPaid), now))
+    }
 }

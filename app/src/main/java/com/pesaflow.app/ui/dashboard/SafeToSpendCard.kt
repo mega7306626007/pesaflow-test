@@ -46,10 +46,11 @@ fun SafeToSpendCard(
     flexibleCash: Double,
     hide: Boolean = false
 ) {
-    val monthly = budgets.firstOrNull { it.category == "ALL" }?.limitAmount?.takeIf { it > 0 }
-    val dailyExplicit = budgets.filter { it.type == BudgetType.DAILY }.sumOf { it.limitAmount }.takeIf { it > 0 }
-    val weeklyExplicit = budgets.filter { it.type == BudgetType.WEEKLY }.sumOf { it.limitAmount }.takeIf { it > 0 }
     val nowMs = System.currentTimeMillis()
+    val budgetLimits = safeSpendBudgetLimits(budgets, nowMs)
+    val monthly = budgetLimits.monthly
+    val dailyExplicit = budgetLimits.daily
+    val weeklyExplicit = budgetLimits.weekly
     val dayMs = 24L * 60 * 60 * 1000
     fun planDailyRate(g: com.pesaflow.app.data.models.SavingsGoal): Double {
         val left = (g.targetAmount - g.currentAmount).coerceAtLeast(0.0)
@@ -77,7 +78,7 @@ fun SafeToSpendCard(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            if (monthly == null && dailyExplicit == null) {
+            if (monthly == null && dailyExplicit == null && weeklyExplicit == null) {
                 Text(
                     "Set a Daily budget or a monthly ALL budget on the Budget tab and I'll compute your allowance — including yesterday's rollover, plans and bills.",
                     style = MaterialTheme.typography.bodySmall,
@@ -92,9 +93,11 @@ fun SafeToSpendCard(
                 set(java.util.Calendar.SECOND, 0)
                 set(java.util.Calendar.MILLISECOND, 0)
             }.timeInMillis
+            val now = System.currentTimeMillis()
             val day = 24L * 60 * 60 * 1000
             fun spentIn(from: Long, to: Long) = transactions.filter {
-                it.type == com.pesaflow.app.data.models.TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= from && it.dateTimestamp < to
+                it.type == com.pesaflow.app.data.models.TransactionType.EXPENSE &&
+                    !it.isSample && it.dateTimestamp >= from && it.dateTimestamp < to && it.dateTimestamp <= now
             }.sumOf { it.amount }.toInt()
             // Weekday-aware pace: Saturdays that run hot earn a bigger slice,
             // quiet Tuesdays a smaller one. Learned per weekday from the last
@@ -115,7 +118,10 @@ fun SafeToSpendCard(
                 // not 30). Yesterday already sits inside spentMonth, so no
                 // separate rollover to double-count it. Every new transaction
                 // shrinks remaining and the target moves the same day.
-                val monthlyLimit = monthly ?: (dailyExplicit?.times(30) ?: 0.0)
+                val monthlyLimit = monthly
+                    ?: dailyExplicit?.times(30)
+                    ?: weeklyExplicit?.times(30.0 / 7.0)
+                    ?: 0.0
                 val spentMonth = com.pesaflow.app.data.money.monthScopedTotal(
                     transactions,
                     com.pesaflow.app.data.models.TransactionType.EXPENSE,
@@ -194,7 +200,10 @@ fun SafeToSpendCard(
                     )
                 }
             } else {
-                val weekBase = weeklyExplicit ?: (monthly?.div(30)?.times(7) ?: 0.0)
+                val weekBase = weeklyExplicit
+                    ?: monthly?.div(30)?.times(7)
+                    ?: dailyExplicit?.times(7)
+                    ?: 0.0
                 val weekTarget = (weekBase - planDaily * 7 - billDaily * 7).toInt().coerceAtLeast(0)
                 // Calendar weeks everywhere: this week to-date vs the complete
                 // previous week. The old rolling 7-day blocks drifted a day at

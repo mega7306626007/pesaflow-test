@@ -1,5 +1,8 @@
 package com.pesaflow.app.ui.dashboard
 
+import com.pesaflow.app.data.models.Budget
+import com.pesaflow.app.data.models.BudgetType
+
 // Safe-to-spend day math, pure and unit-tested. Dynamic by construction:
 // the target is remaining money over remaining days (never a frozen
 // monthly/30), so it breathes with every transaction and every sunrise.
@@ -17,6 +20,44 @@ data class SafeDayFigure(
     /** allowance - todaySpend. May be negative (paused). */
     val left: Int
 )
+
+data class SafeSpendBudgetLimits(
+    val monthly: Double?,
+    val daily: Double?,
+    val weekly: Double?
+)
+
+fun safeSpendBudgetLimits(
+    budgets: List<Budget>,
+    nowMs: Long = System.currentTimeMillis()
+): SafeSpendBudgetLimits {
+    fun amountFor(type: BudgetType): Double? {
+        val scoped = budgets.filter { it.type == type && it.limitAmount > 0.0 }
+        if (scoped.isEmpty()) return null
+        // Active window wins (expired/future rows never cap today); legacy
+        // rows with no usable window fall back to latest-row semantics so old
+        // fixtures still read.
+        val active = scoped.filter { com.pesaflow.app.data.finance.isBudgetActive(it, nowMs) }
+        val pool = if (active.isNotEmpty()) active else scoped
+        val period = pool
+            .groupBy { it.category.trim().uppercase() }
+            .values
+            .mapNotNull { rows -> rows.maxByOrNull { it.startTimestamp } }
+        val master = period
+            .filter { it.category.equals("ALL", ignoreCase = true) }
+            .maxByOrNull { it.startTimestamp }
+        if (master != null) return master.limitAmount
+        return period
+            .filterNot { it.category.equals("ALL", ignoreCase = true) }
+            .sumOf { it.limitAmount }
+            .takeIf { it > 0.0 }
+    }
+    return SafeSpendBudgetLimits(
+        monthly = amountFor(BudgetType.MONTHLY),
+        daily = amountFor(BudgetType.DAILY),
+        weekly = amountFor(BudgetType.WEEKLY)
+    )
+}
 
 fun safeDayFigure(
     monthlyLimit: Double,
@@ -63,6 +104,6 @@ fun reserveBillDaily(
     val horizon = nowMs + 30L * 24 * 60 * 60 * 1000
     val due = bills
         .filter { it.status != "PAID" && it.paidBy == "ME" && it.dueDate <= horizon }
-        .sumOf { it.amount }
+        .sumOf { it.amountRemaining.takeIf { remaining -> remaining > 0.0 } ?: it.amount }
     return if (due > 0) (due / 30).toInt() else 0
 }
