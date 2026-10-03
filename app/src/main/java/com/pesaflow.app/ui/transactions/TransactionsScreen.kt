@@ -107,7 +107,27 @@ fun TransactionsScreen(
     var selecting by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf(setOf<String>()) }
     var rangeDays by remember { mutableStateOf<Int?>(null) }
+    // SMS scan: today up front, longer ranges behind one disclosure.
     var confirmBulk by remember { mutableStateOf(false) }
+    var scanning by remember { mutableStateOf(false) }
+    var scanFound by remember { mutableStateOf(0) }
+    var scanMsg by remember { mutableStateOf<String?>(null) }
+    var showMoreScan by remember { mutableStateOf(false) }
+    fun runScan(days: Int, label: String) {
+        scanning = true
+        scanFound = 0
+        scanMsg = null
+        viewModel.scanInboxDays(
+            daysBack = days,
+            maxRows = if (days <= 1) 150 else 500,
+            onProgress = { f, _ -> scanFound = f },
+            onDone = { found, queued, error ->
+                scanning = false
+                scanMsg = if (error != null) "Scan failed: $error"
+                else "Scanned $found texts ($label): $queued new for review, rest already logged. ✅"
+            }
+        )
+    }
     val now = System.currentTimeMillis()
     val sorted = remember(transactions, typeFilter, merchantQuery, rangeDays) {
         // Range chips cover whole calendar days: the old now - n*24h cutoff
@@ -233,6 +253,44 @@ fun TransactionsScreen(
                     FilterChip(selected = rangeDays == 0, onClick = { rangeDays = if (rangeDays == 0) null else 0 }, label = { Text("Today") })
                     FilterChip(selected = rangeDays == 7, onClick = { rangeDays = if (rangeDays == 7) null else 7 }, label = { Text("7 days") })
                     FilterChip(selected = rangeDays == 30, onClick = { rangeDays = if (rangeDays == 30) null else 30 }, label = { Text("30 days") })
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                // Scan row: today is one tap; week/month/history live behind
+                // a disclosure with plain info about what each one does.
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { runScan(1, "today") }, enabled = !scanning) {
+                        Text(if (scanning) "Scanning… $scanFound found" else "Scan today 📥")
+                    }
+                    TextButton(onClick = { showMoreScan = !showMoreScan }) {
+                        Text(if (showMoreScan) "Less ▴" else "More scan options ▾")
+                    }
+                }
+                if (showMoreScan) {
+                    Text(
+                        "Today checks this morning's texts. Longer scans catch older money — duplicates are skipped automatically by M-Pesa code.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TextButton(onClick = { runScan(7, "7 days") }, enabled = !scanning) { Text("Scan 7 days") }
+                        TextButton(onClick = { runScan(30, "30 days") }, enabled = !scanning) { Text("Scan 30 days") }
+                        TextButton(onClick = { runScan(150, "5 months") }, enabled = !scanning) { Text("Scan 5 months") }
+                    }
+                }
+                scanMsg?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
             LazyColumn(

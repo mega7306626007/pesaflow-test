@@ -30,6 +30,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 class FinanceViewModel(application: Application) : AndroidViewModel(application) {
@@ -598,6 +599,44 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
     fun queueSharedTransaction(pending: PendingTransaction) {
         viewModelScope.launch { repository.insertPendingTransaction(pending) }
+    }
+
+
+    // User-triggered inbox scan for any duration (Transactions "Scan today",
+    // longer ranges). Read-only scan; rows queue via tryQueuePending which
+    // dedupes by M-Pesa code, so rescans never double-book.
+    fun scanInboxDays(
+        daysBack: Int,
+        maxRows: Int = 500,
+        onProgress: (found: Int, parsed: Int) -> Unit = { _, _ -> },
+        onDone: (found: Int, queued: Int, error: String?) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.READ_SMS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                withContext(Dispatchers.Main) { onDone(0, 0, "SMS permission needed — enable it to scan.") }
+                return@launch
+            }
+            try {
+                val result = com.pesaflow.app.data.parsers.scanRecentSms(
+                    context = context,
+                    daysBack = daysBack,
+                    maxRows = maxRows,
+                    onProgress = { f, p ->
+                        launch(Dispatchers.Main) { onProgress(f, p) }
+                    }
+                )
+                var queued = 0
+                result.parsed.forEach { if (tryQueuePending(it)) queued++ }
+                withContext(Dispatchers.Main) { onDone(result.found, queued, result.error) }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onDone(0, 0, e.message ?: e.javaClass.simpleName) }
+            }
+        }
     }
 
 

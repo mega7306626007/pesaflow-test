@@ -1094,7 +1094,17 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                 }
             }
 
-            // My rules (optional): your say, enforced every generation
+            // My rules (optional): your say, enforced every generation.
+            // Collapsed unless you already use rules — beginners never must open it.
+            var showRules by remember { mutableStateOf(mealRules.isNotEmpty()) }
+            TextButton(onClick = { showRules = !showRules }, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (showRules) "My food rules (${mealRules.size}) ▴" else "My food rules (${mealRules.size}) ▾",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (showRules) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -1242,8 +1252,12 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     ) { Text(if (dupExists) "Rule exists ✓" else "Add rule", color = MaterialTheme.colorScheme.onPrimary) }
                 }
             }
+            }
 
             // Who eats? Curated presets — one tap, whole planner configured.
+            // Collapses once chosen — the current preset shows in one line.
+            var showWhoEats by remember(persona) { mutableStateOf(persona.isBlank()) }
+            if (showWhoEats || persona.isBlank()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -1274,6 +1288,15 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                                 applyMealControls(effectiveMealPersona)
                             } else applyPersona(v)
                         }
+                    )
+                }
+            }
+            } else {
+                TextButton(onClick = { showWhoEats = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Eating as: $effectiveMealPersona ▾",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
@@ -1435,7 +1458,17 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                 }
             }
 
-            // Survive till…: stretch your stock to a date, top-ups only for the gap
+            // Survive till…: stretch your stock to a date, top-ups only for the gap.
+            // Collapsed by default — a power tool, not daily reading.
+            var showSurvive by remember { mutableStateOf(false) }
+            TextButton(onClick = { showSurvive = !showSurvive }, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (showSurvive) "Survive till… 🏕️ ▴" else "Survive till… 🏕️ ▾",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (showSurvive) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -1590,6 +1623,7 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                         }
                     }
                 }
+            }
             }
 
             // Today so far (auto): your real Food spending moves this bar — no typing.
