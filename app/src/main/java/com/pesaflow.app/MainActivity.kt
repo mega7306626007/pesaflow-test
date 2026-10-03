@@ -281,15 +281,20 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
             set(java.util.Calendar.MILLISECOND, 0)
         }.timeInMillis
         val dayMs = 24L * 60 * 60 * 1000
-        val expenses = transactions.filter { it.type == com.pesaflow.app.data.models.TransactionType.EXPENSE && !it.isSample }
+        val expenses = transactions.filter { it.type == com.pesaflow.app.data.models.TransactionType.EXPENSE && !it.isSample && it.dateTimestamp <= now }
         val todaySpend = expenses.filter { it.dateTimestamp >= dayStart }.sumOf { it.amount }
         val yesterdaySpend = expenses.filter { it.dateTimestamp >= dayStart - dayMs && it.dateTimestamp < dayStart }.sumOf { it.amount }
         val spentByCategory = expenses.filter { it.dateTimestamp >= dayStart - 30L * dayMs }
             .groupBy { it.category.lowercase() }
             .mapValues { e -> e.value.sumOf { it.amount } }
-        val monthlyAll = budgets.firstOrNull { it.category == "ALL" }?.limitAmount?.takeIf { it > 0 }
-        val dailyExplicit = budgets.filter { it.type == com.pesaflow.app.data.models.BudgetType.DAILY }
-            .sumOf { it.limitAmount }.takeIf { it > 0 }
+        // Same active-budget rule as SafeSpendMath: latest active ALL wins,
+        // else active category sum. firstOrNull froze the oldest ALL forever.
+        val monthlyAll = com.pesaflow.app.data.finance.masterOrCategoryTotal(
+            budgets, com.pesaflow.app.data.models.BudgetType.MONTHLY, now
+        ).takeIf { it > 0 }
+        val dailyExplicit = com.pesaflow.app.data.finance.masterOrCategoryTotal(
+            budgets, com.pesaflow.app.data.models.BudgetType.DAILY, now
+        ).takeIf { it > 0 }
         val dailyTarget = dailyExplicit ?: (monthlyAll?.div(30.0) ?: 500.0)
         val pace = weekdayProfile(
             expenses.map { LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp) },

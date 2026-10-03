@@ -287,14 +287,17 @@ fun processUserInput(
     val budgets = viewModel.budgets.value
     val monthlyBudget = com.pesaflow.app.data.finance.masterOrCategoryTotal(
         budgets,
-        BudgetType.MONTHLY
+        BudgetType.MONTHLY,
+        nowMs
     ).takeIf { it > 0.0 }
     val daysLeft = nowCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH) - nowCal.get(java.util.Calendar.DAY_OF_MONTH) + 1
     val yesterdayStart = dayStart - 24L * 60 * 60 * 1000
     val yesterdaySpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= yesterdayStart && it.dateTimestamp < dayStart }.sumOf { it.amount }
     val openBills = viewModel.bills.value.filter { it.status != "PAID" }
-    val openBillTotal = openBills.filter { it.paidBy == "ME" }.sumOf { it.amount }
-    val externallyFundedBillTotal = openBills.filter { it.paidBy != "ME" }.sumOf { it.amount }
+    // Engine uses amountRemaining (partial payments reduce the bill).
+    // Amount alone double-counts money already paid.
+    val openBillTotal = openBills.filter { it.paidBy == "ME" }.sumOf { it.amountRemaining.takeIf { r -> r > 0 } ?: it.amount }
+    val externallyFundedBillTotal = openBills.filter { it.paidBy != "ME" }.sumOf { it.amountRemaining.takeIf { r -> r > 0 } ?: it.amount }
     val openDebts = viewModel.debts.value.filter { it.status != "PAID" }
     val openDebtTotal = openDebts.sumOf { it.amount }
     // Use the same obligation, reservation and Fuliza treatment as the
