@@ -49,12 +49,16 @@ fun Next30DaysCard(
     // Dynamic horizon: nearest dated inflow (HELB day, allowance day) from
     // the Income tab — the forecast counts down to money, not just month-end.
     inflowDays: Int? = null,
-    incomeSources: List<IncomeSource> = emptyList()
+    incomeSources: List<IncomeSource> = emptyList(),
+    // Canonical held cash from FinancialSnapshot.liquid. Falls back to local
+    // ledger only for unmigrated callers — pass snapshot.liquid going forward.
+    heldBalance: Double? = null
 ) {
     // now captured inside: keying remember on a fresh timestamp recomputed
     // the whole 30-day projection on every recomposition (scroll jank).
-    val projection = remember(transactions, bills, incomeSources) {
+    val projection = remember(transactions, bills, incomeSources, heldBalance) {
         val now = System.currentTimeMillis()
+        val held = heldBalance ?: ledgerBalance(transactions)
         val declaredInflows = expectedIncomeLandings(incomeSources, now, 30)
         val inferredInflows = predictPaydays(transactions, now).filterNot { inferred ->
             declaredInflows.any { declared ->
@@ -64,7 +68,7 @@ fun Next30DaysCard(
             }
         }
         projectCashFlow(
-            balance = ledgerBalance(transactions),
+            balance = held,
             now = now,
             horizonDays = 30,
             paydays = declaredInflows + inferredInflows,
@@ -72,6 +76,7 @@ fun Next30DaysCard(
             recurring = detectRecurring(transactions)
         )
     }
+    val heldForLabel = heldBalance ?: ledgerBalance(transactions)
     val fmt = remember { SimpleDateFormat("d MMM", Locale.getDefault()) }
     val low = projection.lowest
     val lowDate = fmt.format(Date(low.dayStart))
@@ -82,7 +87,7 @@ fun Next30DaysCard(
         Column(verticalArrangement = Arrangement.spacedBy(ppSpacing.sm)) {
             PpSectionHeader(
                 title = "Next 30 days 🔮",
-                subtitle = "Paydays + bills + subscriptions vs KSh ${if (hide) "••••" else ledgerBalance(transactions).toInt()} held" +
+                subtitle = "Paydays + bills + subscriptions vs KSh ${if (hide) "••••" else heldForLabel.toInt()} held (Calculated)" +
                     (if (!hide && inflowDays != null) " · inflow in $inflowDays day${if (inflowDays == 1) "" else "s"} 📥" else "")
             )
             val expectedIncome = projection.days

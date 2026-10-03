@@ -430,7 +430,8 @@ fun DashboardScreen(
                     debts = debts,
                     goals = savingsGoals,
                     incomeSources = viewModel.incomeSources.collectAsState().value,
-                    persona = com.pesaflow.app.ui.budgets.parsePersona(viewModel.getOnboardingAnswers())
+                    persona = com.pesaflow.app.ui.budgets.parsePersona(viewModel.getOnboardingAnswers()),
+                    heldBalance = financialSnapshot.liquid.toDouble()
                 )
             }
 
@@ -442,7 +443,8 @@ fun DashboardScreen(
                     bills = bills,
                     hide = hideBalances,
                     inflowDays = com.pesaflow.app.data.income.nextInflowDay(inflowSources),
-                    incomeSources = inflowSources
+                    incomeSources = inflowSources,
+                    heldBalance = financialSnapshot.liquid.toDouble()
                 )
             }
 

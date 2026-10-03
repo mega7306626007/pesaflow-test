@@ -39,7 +39,11 @@ fun SmartInsightsCard(
     debts: List<com.pesaflow.app.data.models.Debt>,
     goals: List<com.pesaflow.app.data.models.SavingsGoal>,
     incomeSources: List<com.pesaflow.app.data.income.IncomeSource> = emptyList(),
-    persona: Persona = Persona.HOSTEL_COOK
+    persona: Persona = Persona.HOSTEL_COOK,
+    // Canonical held cash from FinancialSnapshot.liquid. Falls back to local
+    // ledger only when callers have not migrated yet — new call sites must
+    // pass the snapshot value so all screens agree on one truth.
+    heldBalance: Double? = null
 ) {
     val appCtx = LocalContext.current
     val weekPlan = WeekPlan.load(appCtx)
@@ -65,7 +69,7 @@ fun SmartInsightsCard(
             }.sumOf { it.amount }
         }
     }
-    val held = remember(transactions) { com.pesaflow.app.data.money.ledgerBalance(transactions) }
+    val held = remember(transactions, heldBalance) { heldBalance ?: com.pesaflow.app.data.money.ledgerBalance(transactions) }
     val watched = remember(transactions) {
         com.pesaflow.app.data.ledger.Watchlist.read(
             appCtx.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
