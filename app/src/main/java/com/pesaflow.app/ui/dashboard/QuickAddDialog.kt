@@ -479,6 +479,19 @@ fun QuickAddDialog(
                         Text("Memory says: $suggestedCat?")
                     }
                 }
+                // Bought vs raw vs cooked: raw foodstuffs belong in Meal Planner
+                // → Foodstuffs (stock updates with the transaction); plates cooked
+                // from stock cost no cash, so they need no transaction at all.
+                if (selectedCategory == "Food" && entryType == com.pesaflow.app.data.models.TransactionType.EXPENSE) {
+                    val looksRaw = com.pesaflow.app.data.meals.stapleByName(inputMerchant.trim()) != null ||
+                        listOf("unga", "sukuma", "cabbage", "ndengu", "rice", "beans", "omena", "tomato", "onion", "oil", "egg", "githeri").any { inputMerchant.contains(it, ignoreCase = true) }
+                    Text(
+                        if (looksRaw) "Looks raw 🧺 — buy it in Meal Planner → Foodstuffs so your shelf updates with this spend. Cooked from stock = KSh 0, no transaction needed."
+                        else "Bought plate stays here. Raw foodstuffs → Meal Planner → Foodstuffs (stock updates). Cooked from stock = KSh 0.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Text("Payment method", style = MaterialTheme.typography.labelLarge)
                 com.pesaflow.app.ui.theme.SegChoice(
                     options = listOf(

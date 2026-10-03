@@ -5,6 +5,8 @@ import com.pesaflow.app.data.finance.SnapshotInput
 import com.pesaflow.app.data.finance.balanceBreakdown
 import com.pesaflow.app.data.finance.buildSnapshot
 import com.pesaflow.app.data.finance.instalmentSchedule
+import com.pesaflow.app.data.meals.STAPLES
+import com.pesaflow.app.data.meals.stapleByName
 import com.pesaflow.app.data.income.IncomeSource
 import com.pesaflow.app.data.income.expectedIncomeLandings
 import com.pesaflow.app.data.income.nextInflowDay
@@ -159,6 +161,16 @@ class TransformationValidationTest {
         assertTrue(instalmentSchedule(5000.0, 1, 7).isEmpty())
         assertTrue(instalmentSchedule(5000.0, 4, 0).isEmpty())
         assertTrue(instalmentSchedule(5000.0, 53, 7).isEmpty())
+    }
+
+    @Test fun `staple catalogue covers comrade quantities`() {
+        assertTrue(STAPLES.size >= 10)
+        val unga = stapleByName("unga")!!
+        assertEquals(7.0, unga.daysPerPack(), 0.001)
+        assertEquals(500.0, unga.buyAmount(2), 0.001)
+        val quarter = stapleByName("CABBAGE")!!
+        assertEquals(2.0, quarter.daysPerPack(), 0.001)
+        assertTrue(STAPLES.all { it.defaultPrice > 0 && it.dailyUse > 0 })
     }
 
     @Test fun `parent daily fare lands every day`() {

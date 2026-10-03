@@ -1301,6 +1301,49 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }
 
 
+    // Foodstuff buy: one tap books the ledger EXPENSE and tops up the shelf.
+    // Price is the user's corrected figure (catalogue default passed in) —
+    // the transaction is the receipt, the stock is the pantry.
+    fun buyFoodstuff(
+        name: String,
+        unitLabel: String,
+        qtyFull: Double,
+        dailyUse: Double,
+        unitPrice: Double,
+        packs: Int,
+        method: PaymentMethod
+    ) {
+        val n = packs.coerceIn(1, 20)
+        val amount = unitPrice * n
+        if (amount <= 0) return
+        viewModelScope.launch {
+            repository.insertTransaction(
+                Transaction(
+                    amount = amount,
+                    type = TransactionType.EXPENSE,
+                    category = "Food",
+                    dateTimestamp = System.currentTimeMillis(),
+                    merchant = "$name ×$n (foodstuff)",
+                    paymentMethod = method,
+                    source = TransactionSource.MANUAL
+                )
+            )
+            val existing = kitchenStock.value.firstOrNull { it.name.equals(name, ignoreCase = true) }
+            if (existing == null) {
+                repository.insertKitchenStock(
+                    KitchenStock(name = name.trim(), unit = unitLabel, qtyFull = qtyFull,
+                        qtyLeft = qtyFull * n, dailyUse = dailyUse, pricePerPack = unitPrice)
+                )
+            } else {
+                repository.updateKitchenStock(
+                    existing.copy(qtyLeft = existing.qtyLeft + qtyFull * n, pricePerPack = unitPrice,
+                        updatedAt = System.currentTimeMillis())
+                )
+            }
+        }
+    }
+
+
     fun setStockPriority(item: KitchenStock, days: Int) {
         viewModelScope.launch {
             repository.updateKitchenStock(item.copy(eatByDays = days, updatedAt = System.currentTimeMillis()))
