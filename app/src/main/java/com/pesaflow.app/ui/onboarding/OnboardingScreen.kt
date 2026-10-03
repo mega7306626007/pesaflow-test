@@ -155,6 +155,9 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
     var sponsorMonthly by rememberSaveable { mutableStateOf("") }
     var rentGuess by rememberSaveable { mutableStateOf("") }
     var transportDaily by rememberSaveable { mutableStateOf("") }
+    // Who pays the fare: Me, or parents daily/weekly (allowance rhythm that
+    // the 30-day projection and Buddy count down to).
+    var farePayer by rememberSaveable { mutableStateOf("Me") }
     var airtimeWeekly by rememberSaveable { mutableStateOf("") }
     var saveTarget by rememberSaveable { mutableStateOf("") }
     // Home setup wires the whole app: budgets, meal planner, transport.
@@ -519,6 +522,18 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     if ("fare" in visible) {
                         OutlinedTextField(value = transportDaily, onValueChange = { transportDaily = it }, label = { Text("Transport per day, to and back? (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                         Text("→ Transport budget (×30) + commuter weight in the calculator.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Who pays this fare?", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        com.pesaflow.app.ui.theme.SegChoice(
+                            options = listOf(
+                                com.pesaflow.app.ui.theme.SegOption("Me", "I pay it myself", "💸"),
+                                com.pesaflow.app.ui.theme.SegOption("Parents daily", "Parents give fare daily", "🚌"),
+                                com.pesaflow.app.ui.theme.SegOption("Parents weekly", "Fare ×5 school days", "🗓️")
+                            ),
+                            selected = farePayer,
+                            onSelect = { farePayer = it }
+                        )
+                        if (farePayer != "Me") Text("→ counted as parent fare allowance in projections + Buddy.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if ("grocery" in visible) {
                         Text("Where do you usually shop? 🛒", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
@@ -1045,6 +1060,20 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                             sponsorMonthly.toDoubleOrNull()?.takeIf { it > 0 }?.let { sp ->
                                 if ("PARENT" !in existingKinds && "GUARDIAN" !in existingKinds) {
                                     seededIncome.add(IncomeSource(kind = "GUARDIAN", label = "Sponsor", expectedAmount = sp, frequency = "MONTHLY"))
+                                }
+                            }
+                            // Parent fare allowance: daily or weekly rhythm feeds
+                            // projections + Buddy countdowns. Weekly = daily ×5 days.
+                            transportDaily.toDoubleOrNull()?.takeIf { it > 0 && farePayer != "Me" }?.let { daily ->
+                                if ("PARENT" !in existingKinds) {
+                                    seededIncome.add(
+                                        IncomeSource(
+                                            kind = "PARENT",
+                                            label = "Parent fare",
+                                            expectedAmount = if (farePayer == "Parents weekly") daily * 5 else daily,
+                                            frequency = if (farePayer == "Parents weekly") "WEEKLY" else "DAILY"
+                                        )
+                                    )
                                 }
                             }
                             if (seededIncome.isNotEmpty()) {

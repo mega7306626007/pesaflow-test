@@ -131,15 +131,21 @@ fun IncomeScreen(viewModel: FinanceViewModel) {
                                 )
                             }
                         }
-                        // Dynamic horizon: nearest dated inflow counts the days.
+                        // Dynamic horizon: nearest expected inflow counts the days —
+                        // monthly paydays, weekly rhythms and daily fare alike.
                         val nextSrc = remember(sources) {
-                            sources.filter { it.frequency == "MONTHLY" && it.dayOfMonth in 1..31 }
+                            sources.filter { it.kind != "FULIZA" && it.expectedAmount > 0 }
                                 .minByOrNull { it.daysUntilLanding() ?: Int.MAX_VALUE }
                         }
                         nextSrc?.daysUntilLanding()?.let { days ->
                             Spacer(modifier = Modifier.height(4.dp))
+                            val what = nextSrc.label.ifBlank { nextSrc.displayKind() }
                             Text(
-                                "Next: ${nextSrc.label.ifBlank { nextSrc.displayKind() }} in $days day${if (days == 1) "" else "s"} 📥",
+                                when (nextSrc.frequency) {
+                                    "DAILY" -> "$what lands daily 📥 (fare rhythm, not a dated promise)"
+                                    "WEEKLY" -> "$what weekly rhythm · ~$days days 📥"
+                                    else -> "Next: $what in $days day${if (days == 1) "" else "s"} 📥"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary

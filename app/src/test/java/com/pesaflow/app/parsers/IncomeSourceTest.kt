@@ -39,6 +39,7 @@ class IncomeSourceTest {
     @Test
     fun `next inflow counts down to dated monthly sources`() {
         // Sep 13: HELB day 20 → 7 days; guardian day 5 → passed, wraps to Oct 5 (22 days).
+        // Daily hustle counts as a 1-day fare rhythm, so the nearest horizon is 1.
         val now = java.util.Calendar.getInstance().apply {
             set(2026, java.util.Calendar.SEPTEMBER, 13, 9, 0, 0)
             set(java.util.Calendar.MILLISECOND, 0)
@@ -49,7 +50,11 @@ class IncomeSourceTest {
             IncomeSource(kind = "HUSTLE", expectedAmount = 100.0, frequency = "DAILY"),
             IncomeSource(kind = "JOB", expectedAmount = 15000.0, frequency = "MONTHLY", dayOfMonth = 0)
         )
-        assertEquals(7, com.pesaflow.app.data.income.nextInflowDay(sources, now))
+        assertEquals(1, com.pesaflow.app.data.income.nextInflowDay(sources, now))
+        assertEquals(
+            7,
+            com.pesaflow.app.data.income.nextInflowDay(sources.filter { it.frequency == "MONTHLY" }, now)
+        )
     }
 
     @Test
@@ -85,10 +90,12 @@ class IncomeSourceTest {
             now,
             30
         )
-        assertEquals(1, forecast.size)
-        assertEquals(8000.0, forecast.single().second, 0.001)
-        val date = java.util.Calendar.getInstance().apply { timeInMillis = forecast.single().third }
+        // 1 dated monthly landing + 4 weekly-rhythm events; uncertain + Fuliza excluded.
+        assertEquals(5, forecast.size)
+        assertEquals(8000.0, forecast.first().second, 0.001)
+        val date = java.util.Calendar.getInstance().apply { timeInMillis = forecast.first().third }
         assertEquals(29, date.get(java.util.Calendar.DAY_OF_MONTH))
+        assertTrue(forecast.drop(1).all { it.second == 600.0 })
     }
 
     @Test

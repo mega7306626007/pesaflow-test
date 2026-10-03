@@ -438,14 +438,26 @@ fun processUserInput(
 
         q.contains("transport") || q.contains("fare") || q.contains("nauli") || q.contains("matatu") || q.contains("boda") ->
             run {
-                val facts = viewModel.userContextFacts.value
-                val home = facts["housing.current"] ?: "home"
-                val mode = facts["transport.primaryMode"] ?: "your usual mode"
-                val stages = facts["transport.homeToCampus"]
-                if (txs.isEmpty()) "No spending logged yet — I'll estimate transport once your ledger has data."
-                else "Your usual route: $home → campus by $mode" +
-                    (stages?.let { " via $it" } ?: "") +
-                    ". Log a fare and I'll track the real cost."
+                val fareSrc = viewModel.incomeSources.value.firstOrNull {
+                    (it.kind == "PARENT" || it.kind == "GUARDIAN") &&
+                        (it.frequency == "DAILY" || it.frequency == "WEEKLY") && it.expectedAmount > 0
+                }
+                if ((q.contains("when") || q.contains("coming") || q.contains("allowance") || q.contains("give")) && fareSrc != null) {
+                    val who = fareSrc.label.ifBlank { fareSrc.displayKind() }
+                    when (fareSrc.frequency) {
+                        "DAILY" -> "$who gives KSh ${fareSrc.expectedAmount.toInt()} daily for fare (you entered) — next lands tomorrow morning. If it doesn't arrive, your flexible KSh ${freeBalance.toInt()} covers it. 🚌"
+                        else -> "$who gives KSh ${fareSrc.expectedAmount.toInt()} weekly for fare (you entered rhythm, ~7 days). Flexible right now: KSh ${freeBalance.toInt()}. 🚌"
+                    }
+                } else {
+                    val facts = viewModel.userContextFacts.value
+                    val home = facts["housing.current"] ?: "home"
+                    val mode = facts["transport.primaryMode"] ?: "your usual mode"
+                    val stages = facts["transport.homeToCampus"]
+                    if (txs.isEmpty()) "No spending logged yet — I'll estimate transport once your ledger has data."
+                    else "Your usual route: $home → campus by $mode" +
+                        (stages?.let { " via $it" } ?: "") +
+                        ". Log a fare and I'll track the real cost."
+                }
             }
 
         q.contains("yesterday") || q.contains("jana") ->

@@ -33,9 +33,14 @@ data class IncomeSource(
     }
 
     // Days until this source's next dated landing (HELB/bank day-of-month).
-    // Undated, daily/weekly (continuous) and one-off sources don't anchor a
-    // horizon — null. Pure, unit-tested.
+    // DAILY allowances (e.g. parent fare) land every school day — next one is
+    // tomorrow. WEEKLY has no weekday anchor in the schema, so it counts down
+    // a 7-day cadence from today, labelled as rhythm, not a dated promise.
+    // Undated, continuous and one-off sources don't anchor a horizon — null.
+    // Pure, unit-tested.
     fun daysUntilLanding(nowMs: Long = System.currentTimeMillis()): Int? {
+        if (frequency == "DAILY") return 1
+        if (frequency == "WEEKLY") return 7
         if (frequency != "MONTHLY" || dayOfMonth !in 1..31) return null
         val today = java.util.Calendar.getInstance().apply {
             timeInMillis = nowMs
@@ -171,9 +176,11 @@ object IncomeSourceStore {
 
 
 /**
- * Days until the nearest dated monthly inflow across all sources — the
- * dynamic horizon cash planning should count down to. Null when nothing is
- * dated (horizon falls back to month/semester bounds). Pure, unit-tested.
+ * Days until the nearest expected inflow across all sources — the
+ * dynamic horizon cash planning should count down to. Monthly dated sources
+ * use their day-of-month; DAILY allowances count as 1 (tomorrow's fare),
+ * WEEKLY as a 7-day rhythm. Null when nothing is expected (horizon falls
+ * back to month/semester bounds). Pure, unit-tested.
  */
 fun nextInflowDay(sources: List<IncomeSource>, nowMs: Long = System.currentTimeMillis()): Int? =
     sources.asSequence()
@@ -184,6 +191,8 @@ fun nextInflowDay(sources: List<IncomeSource>, nowMs: Long = System.currentTimeM
 /**
  * Dated monthly income expectations in a forecast horizon. These are user-
  * declared estimates, not guarantees; undated/irregular sources are omitted.
+ * DAILY allowances (e.g. parent fare) expand to one event per day, WEEKLY to
+ * one per 7 days from today — cadence estimates, labelled by source.
  */
 fun expectedIncomeLandings(
     sources: List<IncomeSource>,
@@ -191,19 +200,26 @@ fun expectedIncomeLandings(
     horizonDays: Int = 30
 ): List<Triple<String, Double, Long>> {
     if (horizonDays <= 0) return emptyList()
-    return sources.mapNotNull { source ->
-        if (source.kind == "FULIZA" || source.expectedAmount <= 0) return@mapNotNull null
-        val days = source.daysUntilLanding(nowMs) ?: return@mapNotNull null
-        if (days >= horizonDays) return@mapNotNull null
-        val label = source.label.ifBlank { source.displayKind() }
-        val due = java.util.Calendar.getInstance().apply {
+    fun dayStart(offset: Int): Long =
+        java.util.Calendar.getInstance().apply {
             timeInMillis = nowMs
             set(java.util.Calendar.HOUR_OF_DAY, 0)
             set(java.util.Calendar.MINUTE, 0)
             set(java.util.Calendar.SECOND, 0)
             set(java.util.Calendar.MILLISECOND, 0)
-            add(java.util.Calendar.DAY_OF_MONTH, days)
+            add(java.util.Calendar.DAY_OF_MONTH, offset)
         }.timeInMillis
-        Triple(label, source.expectedAmount, due)
+    return sources.flatMap { source ->
+        if (source.kind == "FULIZA" || source.expectedAmount <= 0) return@flatMap emptyList()
+        val label = source.label.ifBlank { source.displayKind() }
+        when (source.frequency) {
+            "DAILY" -> (1..horizonDays).map { d -> Triple(label, source.expectedAmount, dayStart(d)) }
+            "WEEKLY" -> (7..horizonDays step 7).map { d -> Triple(label, source.expectedAmount, dayStart(d)) }
+            else -> {
+                val days = source.daysUntilLanding(nowMs) ?: return@flatMap emptyList()
+                if (days >= horizonDays) return@flatMap emptyList()
+                listOf(Triple(label, source.expectedAmount, dayStart(days)))
+            }
+        }
     }.sortedBy { it.third }
 }

@@ -4,6 +4,9 @@ import com.pesaflow.app.data.finance.MoneyFormatter
 import com.pesaflow.app.data.finance.SnapshotInput
 import com.pesaflow.app.data.finance.balanceBreakdown
 import com.pesaflow.app.data.finance.buildSnapshot
+import com.pesaflow.app.data.income.IncomeSource
+import com.pesaflow.app.data.income.expectedIncomeLandings
+import com.pesaflow.app.data.income.nextInflowDay
 import com.pesaflow.app.data.models.Bill
 import com.pesaflow.app.data.models.PaymentMethod
 import com.pesaflow.app.data.models.Transaction
@@ -130,5 +133,37 @@ class TransformationValidationTest {
         val t = tx(99999.0, TransactionType.INCOME).copy(isSample = true)
         val s = snap(listOf(t))
         assertEquals(0.0, s.liquid.toDouble(), 0.001)
+    }
+
+    @Test fun `parent daily fare lands every day`() {
+        val src = IncomeSource(kind = "PARENT", label = "Parent fare", expectedAmount = 300.0, frequency = "DAILY")
+        assertEquals(1, src.daysUntilLanding(now))
+        val landings = expectedIncomeLandings(listOf(src), now, 30)
+        assertEquals(30, landings.size)
+        assertTrue(landings.all { it.second == 300.0 })
+        assertEquals(1, nextInflowDay(listOf(src), now))
+    }
+
+    @Test fun `parent weekly fare lands four times`() {
+        val src = IncomeSource(kind = "PARENT", label = "Parent fare", expectedAmount = 1500.0, frequency = "WEEKLY")
+        assertEquals(7, src.daysUntilLanding(now))
+        val landings = expectedIncomeLandings(listOf(src), now, 30)
+        assertEquals(4, landings.size)
+        assertTrue(landings.all { it.second == 1500.0 })
+        assertEquals(7, nextInflowDay(listOf(src), now))
+    }
+
+    @Test fun `monthly and fuliza landing rules unchanged`() {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = now }
+        val dom = cal.get(java.util.Calendar.DAY_OF_MONTH)
+        val dim = cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+        val futureDom = if (dom < dim) dom + 1 else dim
+        val monthly = IncomeSource(kind = "JOB", label = "Job", expectedAmount = 20000.0, frequency = "MONTHLY", dayOfMonth = futureDom)
+        assertEquals(1, monthly.daysUntilLanding(now))
+        assertEquals(1, expectedIncomeLandings(listOf(monthly), now, 30).size)
+        val fuliza = IncomeSource(kind = "FULIZA", label = "Fuliza", expectedAmount = 500.0, frequency = "DAILY")
+        assertTrue(expectedIncomeLandings(listOf(fuliza), now, 30).isEmpty())
+        assertNull(nextInflowDay(emptyList(), now))
+        assertNull(nextInflowDay(listOf(fuliza), now))
     }
 }
