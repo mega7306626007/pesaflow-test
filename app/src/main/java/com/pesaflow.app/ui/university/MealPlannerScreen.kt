@@ -314,6 +314,15 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
     LaunchedEffect(effectiveMealPersona) {
         if (persona == "Auto" || persona.isBlank()) applyMealControls(effectiveMealPersona)
     }
+    // Lunch default follows the persona once: long-commute Transport kids
+    // usually skip it, everyone else keeps it. One-shot (touched flag) — the
+    // chip stays fully manual afterwards, and logs retrain the pace anyway.
+    LaunchedEffect(Unit) {
+        if (!mealPrefs.contains("lunch_default_touched")) {
+            mealPrefs.edit().putBoolean("lunch_default_touched", true).apply()
+            if (effectiveMealPersona == "Transport") includeLunch = false
+        }
+    }
     // Survival mode: stretch stock till a date, top-ups only for the gap
     var survivalDays by remember { mutableStateOf(7) }
     var survivalCash by remember { mutableStateOf("") }
@@ -1323,6 +1332,88 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
+            // Foodstuffs: tap a staple + quantity and it is bought — the ledger
+            // EXPENSE and the shelf top-up happen in the same tap. Prices are
+            // kiosk estimates; correct once and your figure sticks.
+            var stapleIdx by remember { mutableStateOf(1) }
+            var staplePacks by remember { mutableStateOf(1) }
+            var staplePrice by remember { mutableStateOf("") }
+            var stapleMethod by remember { mutableStateOf("M-Pesa") }
+            var buyMsg by remember { mutableStateOf<String?>(null) }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text("Foodstuffs 🧺", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Bunches, quarters, packs — tap, set quantity, bought. Transaction + shelf update together.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.pesaflow.app.data.meals.STAPLES.forEachIndexed { idx, s ->
+                            FilterChip(
+                                selected = stapleIdx == idx,
+                                onClick = { stapleIdx = idx; staplePacks = 1; staplePrice = ""; buyMsg = null },
+                                label = { Text(s.name) }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val staple = com.pesaflow.app.data.meals.STAPLES[stapleIdx.coerceIn(com.pesaflow.app.data.meals.STAPLES.indices)]
+                    val unitPrice = staplePrice.toDoubleOrNull()?.takeIf { it > 0 } ?: staple.defaultPrice
+                    val days = (staple.daysPerPack() * staplePacks).toInt()
+                    Text(
+                        "${staple.name} — ${staple.unitLabel} — KSh ${unitPrice.toInt()} each (~${staple.daysPerPack().toInt()} days/pack)",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Qty:", style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { staplePacks = (staplePacks - 1).coerceAtLeast(1) }) { Text("−") }
+                        Text("$staplePacks", fontWeight = FontWeight.Bold)
+                        TextButton(onClick = { staplePacks = (staplePacks + 1).coerceAtMost(20) }) { Text("+") }
+                        OutlinedTextField(
+                            value = staplePrice,
+                            onValueChange = { staplePrice = it.filter { c -> c.isDigit() || c == '.' }.take(6); buyMsg = null },
+                            label = { Text("Price each") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        listOf("M-Pesa", "Cash").forEach { m ->
+                            FilterChip(selected = stapleMethod == m, onClick = { stapleMethod = m }, label = { Text(m) })
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            viewModel.buyFoodstuff(
+                                staple.name, staple.unitLabel, staple.qtyFull, staple.dailyUse,
+                                unitPrice, staplePacks,
+                                if (stapleMethod == "Cash") com.pesaflow.app.data.models.PaymentMethod.CASH
+                                else com.pesaflow.app.data.models.PaymentMethod.MPESA
+                            )
+                            buyMsg = "Bought $staplePacks × ${staple.name} KSh ${(unitPrice * staplePacks).toInt()} → +$days days shelf ✅"
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) { Text("Buy $staplePacks × KSh ${(unitPrice * staplePacks).toInt()} → +$days days", color = MaterialTheme.colorScheme.onPrimary) }
+                    buyMsg?.let {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
             // Generator card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1624,88 +1715,6 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     }
                 }
             }
-            }
-
-            // Foodstuffs: tap a staple + quantity and it is bought — the ledger
-            // EXPENSE and the shelf top-up happen in the same tap. Prices are
-            // kiosk estimates; correct once and your figure sticks.
-            var stapleIdx by remember { mutableStateOf(1) }
-            var staplePacks by remember { mutableStateOf(1) }
-            var staplePrice by remember { mutableStateOf("") }
-            var stapleMethod by remember { mutableStateOf("M-Pesa") }
-            var buyMsg by remember { mutableStateOf<String?>(null) }
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text("Foodstuffs 🧺", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Bunches, quarters, packs — tap, set quantity, bought. Transaction + shelf update together.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    @OptIn(ExperimentalLayoutApi::class)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        com.pesaflow.app.data.meals.STAPLES.forEachIndexed { idx, s ->
-                            FilterChip(
-                                selected = stapleIdx == idx,
-                                onClick = { stapleIdx = idx; staplePacks = 1; staplePrice = ""; buyMsg = null },
-                                label = { Text(s.name) }
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val staple = com.pesaflow.app.data.meals.STAPLES[stapleIdx.coerceIn(com.pesaflow.app.data.meals.STAPLES.indices)]
-                    val unitPrice = staplePrice.toDoubleOrNull()?.takeIf { it > 0 } ?: staple.defaultPrice
-                    val days = (staple.daysPerPack() * staplePacks).toInt()
-                    Text(
-                        "${staple.name} — ${staple.unitLabel} — KSh ${unitPrice.toInt()} each (~${staple.daysPerPack().toInt()} days/pack)",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Qty:", style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = { staplePacks = (staplePacks - 1).coerceAtLeast(1) }) { Text("−") }
-                        Text("$staplePacks", fontWeight = FontWeight.Bold)
-                        TextButton(onClick = { staplePacks = (staplePacks + 1).coerceAtMost(20) }) { Text("+") }
-                        OutlinedTextField(
-                            value = staplePrice,
-                            onValueChange = { staplePrice = it.filter { c -> c.isDigit() || c == '.' }.take(6); buyMsg = null },
-                            label = { Text("Price each") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        listOf("M-Pesa", "Cash").forEach { m ->
-                            FilterChip(selected = stapleMethod == m, onClick = { stapleMethod = m }, label = { Text(m) })
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            viewModel.buyFoodstuff(
-                                staple.name, staple.unitLabel, staple.qtyFull, staple.dailyUse,
-                                unitPrice, staplePacks,
-                                if (stapleMethod == "Cash") com.pesaflow.app.data.models.PaymentMethod.CASH
-                                else com.pesaflow.app.data.models.PaymentMethod.MPESA
-                            )
-                            buyMsg = "Bought $staplePacks × ${staple.name} KSh ${(unitPrice * staplePacks).toInt()} → +$days days shelf ✅"
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                    ) { Text("Buy $staplePacks × KSh ${(unitPrice * staplePacks).toInt()} → +$days days", color = MaterialTheme.colorScheme.onPrimary) }
-                    buyMsg?.let {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                    }
-                }
             }
 
             // Today so far (auto): your real Food spending moves this bar — no typing.

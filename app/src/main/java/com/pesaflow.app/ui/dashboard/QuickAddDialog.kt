@@ -479,15 +479,18 @@ fun QuickAddDialog(
                         Text("Memory says: $suggestedCat?")
                     }
                 }
-                // Bought vs raw vs cooked: raw foodstuffs belong in Meal Planner
-                // → Foodstuffs (stock updates with the transaction); plates cooked
-                // from stock cost no cash, so they need no transaction at all.
+                // Bought vs raw vs cooked, inferred first: known campus spots read
+                // as bought plates, catalogue/raw words as foodstuffs. Unknown
+                // merchants get no claim — the user corrects once and memory learns.
                 if (selectedCategory == "Food" && entryType == com.pesaflow.app.data.models.TransactionType.EXPENSE) {
-                    val looksRaw = com.pesaflow.app.data.meals.stapleByName(inputMerchant.trim()) != null ||
-                        listOf("unga", "sukuma", "cabbage", "ndengu", "rice", "beans", "omena", "tomato", "onion", "oil", "egg", "githeri").any { inputMerchant.contains(it, ignoreCase = true) }
+                    val uniName = viewModel.universityProfile.value?.universityName.orEmpty()
+                    val kind = com.pesaflow.app.data.meals.inferFoodKind(inputMerchant.trim(), uniName)
                     Text(
-                        if (looksRaw) "Looks raw 🧺 — buy it in Meal Planner → Foodstuffs so your shelf updates with this spend. Cooked from stock = KSh 0, no transaction needed."
-                        else "Bought plate stays here. Raw foodstuffs → Meal Planner → Foodstuffs (stock updates). Cooked from stock = KSh 0.",
+                        when (kind) {
+                            com.pesaflow.app.data.meals.FoodKind.RAW_FOODSTUFF -> "Looks raw 🧺 — buy it in Meal Planner → Foodstuffs so your shelf updates with this spend. Cooked from stock = KSh 0, no transaction needed."
+                            com.pesaflow.app.data.meals.FoodKind.BOUGHT_PLATE -> "Known spot plate 🍽️ — stays here. (Wrong? Correct the merchant once and I'll remember.)"
+                            else -> "Bought plate stays here. Raw foodstuffs → Meal Planner → Foodstuffs (stock updates). Cooked from stock = KSh 0."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

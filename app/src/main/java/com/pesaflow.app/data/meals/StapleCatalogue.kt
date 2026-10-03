@@ -39,3 +39,25 @@ val STAPLES: List<Staple> = listOf(
 
 fun stapleByName(name: String): Staple? =
     STAPLES.firstOrNull { it.name.equals(name, ignoreCase = true) }
+
+// Bought vs raw inference (best of both): known campus spots read as
+// bought plates, catalogue/raw words read as foodstuffs, everything else is
+// UNKNOWN and the app asks once instead of guessing. Pure, unit-tested.
+enum class FoodKind { BOUGHT_PLATE, RAW_FOODSTUFF, UNKNOWN }
+
+fun inferFoodKind(merchant: String, universityName: String = ""): FoodKind {
+    val m = merchant.trim()
+    if (m.isBlank()) return FoodKind.UNKNOWN
+    if (spotsFor(universityName).any {
+            it.spot.equals(m, ignoreCase = true) || it.item.equals(m, ignoreCase = true)
+        }
+    ) return FoodKind.BOUGHT_PLATE
+    if (stapleByName(m) != null) return FoodKind.RAW_FOODSTUFF
+    val rawWords = listOf(
+        "unga", "sukuma", "cabbage", "ndengu", "rice", "beans", "omena",
+        "tomato", "onion", "oil", "egg", "githeri", "mboga", "flour",
+        "sugar", "salt", "milk", "bread", "chapati", "flour"
+    )
+    if (rawWords.any { m.contains(it, ignoreCase = true) }) return FoodKind.RAW_FOODSTUFF
+    return FoodKind.UNKNOWN
+}

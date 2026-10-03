@@ -163,14 +163,36 @@ class TransformationValidationTest {
         assertTrue(instalmentSchedule(5000.0, 53, 7).isEmpty())
     }
 
-    @Test fun `staple catalogue covers comrade quantities`() {
-        assertTrue(STAPLES.size >= 10)
+    @Test fun `staple catalogue covers comrade quantities`() {        assertTrue(STAPLES.size >= 10)
         val unga = stapleByName("unga")!!
         assertEquals(7.0, unga.daysPerPack(), 0.001)
         assertEquals(500.0, unga.buyAmount(2), 0.001)
         val quarter = stapleByName("CABBAGE")!!
         assertEquals(2.0, quarter.daysPerPack(), 0.001)
         assertTrue(STAPLES.all { it.defaultPrice > 0 && it.dailyUse > 0 })
+    }
+
+    @Test fun `food kind inference never guesses`() {
+        assertEquals(
+            com.pesaflow.app.data.meals.FoodKind.RAW_FOODSTUFF,
+            com.pesaflow.app.data.meals.inferFoodKind("unga")
+        )
+        assertEquals(
+            com.pesaflow.app.data.meals.FoodKind.RAW_FOODSTUFF,
+            com.pesaflow.app.data.meals.inferFoodKind("Mama Njoroge sukuma")
+        )
+        assertEquals(
+            com.pesaflow.app.data.meals.FoodKind.BOUGHT_PLATE,
+            com.pesaflow.app.data.meals.inferFoodKind("Smocha", "University of Nairobi")
+        )
+        assertEquals(
+            com.pesaflow.app.data.meals.FoodKind.UNKNOWN,
+            com.pesaflow.app.data.meals.inferFoodKind("Daniel Mayoli")
+        )
+        assertEquals(
+            com.pesaflow.app.data.meals.FoodKind.UNKNOWN,
+            com.pesaflow.app.data.meals.inferFoodKind("   ")
+        )
     }
 
     @Test fun `parent daily fare lands every day`() {

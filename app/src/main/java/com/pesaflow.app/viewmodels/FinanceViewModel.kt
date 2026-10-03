@@ -1317,6 +1317,8 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         val amount = unitPrice * n
         if (amount <= 0) return
         viewModelScope.launch {
+            val existing = kitchenStock.value.firstOrNull { it.name.equals(name, ignoreCase = true) }
+            val shelfId = existing?.id ?: java.util.UUID.randomUUID().toString()
             repository.insertTransaction(
                 Transaction(
                     amount = amount,
@@ -1325,13 +1327,13 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                     dateTimestamp = System.currentTimeMillis(),
                     merchant = "$name ×$n (foodstuff)",
                     paymentMethod = method,
-                    source = TransactionSource.MANUAL
+                    source = TransactionSource.MANUAL,
+                    stockId = shelfId
                 )
             )
-            val existing = kitchenStock.value.firstOrNull { it.name.equals(name, ignoreCase = true) }
             if (existing == null) {
                 repository.insertKitchenStock(
-                    KitchenStock(name = name.trim(), unit = unitLabel, qtyFull = qtyFull,
+                    KitchenStock(id = shelfId, name = name.trim(), unit = unitLabel, qtyFull = qtyFull,
                         qtyLeft = qtyFull * n, dailyUse = dailyUse, pricePerPack = unitPrice)
                 )
             } else {

@@ -62,7 +62,8 @@ data class Transaction(
     val accountKind: String = "", // Account.name where it lives; "" = derive (legacy rows)
     val transferGroupId: String? = null, // paired internal moves share one id
     val transferSide: String = "", // OUT = leaves this account, IN = arrives; "" = unpaired legacy
-    val isOpening: Boolean = false // opening equity, never monthly earned income
+    val isOpening: Boolean = false, // opening equity, never monthly earned income
+    val stockId: String? = null // hard link: this spend stocked this KitchenStock row (foodstuff buys)
 )
 
 
