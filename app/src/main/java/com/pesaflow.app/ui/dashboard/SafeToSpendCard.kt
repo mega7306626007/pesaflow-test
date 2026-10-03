@@ -43,6 +43,7 @@ fun SafeToSpendCard(
     budgets: List<com.pesaflow.app.data.models.Budget>,
     goals: List<com.pesaflow.app.data.models.SavingsGoal>,
     bills: List<com.pesaflow.app.data.models.Bill>,
+    flexibleCash: Double,
     hide: Boolean = false
 ) {
     val monthly = budgets.firstOrNull { it.category == "ALL" }?.limitAmount?.takeIf { it > 0 }
@@ -126,7 +127,7 @@ fun SafeToSpendCard(
                 val dim = cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
                 val fig = safeDayFigure(
                     monthlyLimit, spentMonth, planDaily, billDaily,
-                    weekdayFactor ?: 1.0, todaySpend, dom, dim
+                    weekdayFactor ?: 1.0, todaySpend, dom, dim, flexibleCash
                 )
                 val dailyTarget = fig.dailyTarget
                 val allowance = fig.allowance
@@ -154,7 +155,7 @@ fun SafeToSpendCard(
                     }
                 }
             Spacer(modifier = Modifier.height(8.dp))
-            SafeMathRow(label = "Daily target (KSh ${fig.remaining.toInt()} ÷ ${fig.daysLeft}d left)", value = "KSh $dailyTarget")
+            SafeMathRow(label = "Daily target (budget pace, capped by flexible cash)", value = "KSh $dailyTarget")
             if (weekdayFactor != null) {
                 SafeMathRow(
                     label = "Weekday pace (×${"%.1f".format(weekdayFactor)} today)",
@@ -208,7 +209,7 @@ fun SafeToSpendCard(
                 // Allowance is exactly the target: last week's balance is copy,
                 // not math (weeklyAllowance pins this — rollover doubled it).
                 val weekRollover = weekTarget - prevWeekSpend
-                val weekAllowance = weeklyAllowance(weekTarget)
+                val weekAllowance = minOf(weeklyAllowance(weekTarget), flexibleCash.coerceAtLeast(0.0).toInt())
                 val weekLeft = weekAllowance - thisWeekSpend
 
                 Row(verticalAlignment = Alignment.CenterVertically) {

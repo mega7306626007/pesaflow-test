@@ -91,6 +91,32 @@ data class PendingTransaction(
     val displayMerchant: String = ""
 )
 
+fun Transaction.isFulizaBorrowing(): Boolean =
+    type == TransactionType.INCOME &&
+        (subcategory.equals("Borrowed funds", ignoreCase = true) ||
+            merchant.contains("fuliza", ignoreCase = true))
+
+fun PendingTransaction.isFulizaBorrowing(): Boolean =
+    type == TransactionType.INCOME &&
+        (subcategory.equals("Borrowed funds", ignoreCase = true) ||
+            merchant.contains("fuliza", ignoreCase = true))
+
+fun Transaction.isEarnedIncome(): Boolean =
+    type == TransactionType.INCOME && !isOpening && !isFulizaBorrowing() &&
+        !isInternalTransferIncome()
+
+fun PendingTransaction.isEarnedIncome(): Boolean =
+    type == TransactionType.INCOME && !isFulizaBorrowing() &&
+        !isInternalTransferIncome()
+
+private fun Transaction.isInternalTransferIncome(): Boolean =
+    subcategory.equals("Ziidi transfer", ignoreCase = true) ||
+        subcategory.equals("Own account transfer", ignoreCase = true)
+
+private fun PendingTransaction.isInternalTransferIncome(): Boolean =
+    subcategory.equals("Ziidi transfer", ignoreCase = true) ||
+        subcategory.equals("Own account transfer", ignoreCase = true)
+
 
 @Serializable
 @Entity(tableName = "budgets")

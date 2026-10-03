@@ -59,6 +59,12 @@ object MpesaParser {
         "([A-Z0-9]{8,12})\\s*Confirmed\\.[^.]{0,80}?borrowed\\s+KSh\\s*([0-9,.]+)",
         Pattern.CASE_INSENSITIVE
     )
+    private val ziidiActionAmountRegex = Pattern.compile(
+        "(?i)(?:confirmed[.!]?\\s*)?(?:you\\s+have\\s+)?(?:successfully\\s+)?(?:transferred|sent|invested|deposited|withdrawn|redeemed|received|moved)\\b[^.]{0,60}?(?:KSh|KES)\\s*([0-9,.]+)"
+    )
+    private val ziidiAmountActionRegex = Pattern.compile(
+        "(?i)(?:KSh|KES)\\s*([0-9,.]+)[^.]{0,60}?(?:transferred|sent|invested|deposited|withdrawn|redeemed|received|moved)\\b"
+    )
     // Fuliza limit/balance notices ("your Fuliza balance is KSh 200") — money you
     // could touch, still a loan. Parsed so the user gets asked, never auto-spent.
     private val fulizaBalanceRegex = Pattern.compile(
@@ -197,7 +203,7 @@ object MpesaParser {
         "mpesa", "safaricom", "airtel", "telkom", "equitel", "t-kash",
         "kcb", "equity", "co-op", "coop", "absa", "stanbic", "family",
         "dtb", "ncba", "i&m", "stanchart",
-        "helb", "sacco", "stima", "unaitas", "mwalimu", "harambee"
+        "helb", "sacco", "stima", "unaitas", "mwalimu", "harambee", "ziidi"
     )
 
     fun isOfficialSender(sender: String): Boolean {
@@ -319,6 +325,38 @@ object MpesaParser {
         // doesn't, reservations get "confirmed" all the time.
         val looksFuture = low0.contains("booking") || low0.contains("reservation") || low0.contains("on arrival") || low0.contains("on delivery")
         if (looksFuture && !(low0.contains("paid") || low0.contains("received") || low0.contains("debited") || low0.contains("deducted") || low0.contains("repaid") || low0.contains("repayment"))) return null
+
+        // Ziidi sends its own wallet notice as well as the M-Pesa confirmation.
+        // Normalize both into one named savings movement so the scan/ledger can
+        // recognize a mirrored notice without treating it as another purchase.
+        if (low0.contains("ziidi") && listOf(
+                "transferred", "sent", "invested", "deposited", "withdrawn",
+                "redeemed", "received", "moved"
+            ).any { low0.contains(it) }
+        ) {
+            val ziidiMatcher = ziidiActionAmountRegex.matcher(sanitized)
+            val amount = if (ziidiMatcher.find()) ziidiMatcher.group(1) else {
+                ziidiAmountActionRegex.matcher(sanitized).let { reverse ->
+                    if (reverse.find()) reverse.group(1) else null
+                }
+            }
+            if (amount != null) {
+                val withdrawal = low0.contains("withdraw") || low0.contains("redeem") ||
+                    (low0.contains("from ziidi") || low0.contains("ziidi to m-pesa"))
+                val code = Regex("^\\s*([A-Z0-9]{8,12})\\s*Confirmed", RegexOption.IGNORE_CASE)
+                    .find(sanitized)?.groupValues?.get(1)
+                return buildPending(
+                    code = code,
+                    amountStr = amount,
+                    party = "Ziidi",
+                    dateStr = null,
+                    timeStr = null,
+                    type = if (withdrawal) TransactionType.INCOME else TransactionType.SAVING,
+                    raw = sanitized,
+                    confidence = 0.85f
+                )?.copy(category = "Savings", subcategory = "Ziidi transfer", merchant = "Ziidi")
+            }
+        }
         
         // Match standard Sent Money
         var matcher = p2pRegex.matcher(sanitized)
@@ -692,13 +730,13 @@ object MpesaParser {
             return buildPending(
                 code = null,
                 amountStr = matcher.group(1),
-                party = "Safaricom Bundles",
+                party = "Safaricom Data",
                 dateStr = null,
                 timeStr = null,
                 type = TransactionType.EXPENSE,
                 raw = sanitized,
                 confidence = 0.8f
-            )
+            )?.copy(category = "Data")
         }
 
 
@@ -730,7 +768,7 @@ object MpesaParser {
                 type = TransactionType.INCOME,
                 raw = sanitized,
                 confidence = 0.8f
-            )
+            )?.copy(category = "Transfers", subcategory = "Own account transfer")
         }
 
 
@@ -905,7 +943,10 @@ object MpesaParser {
                 type = TransactionType.EXPENSE,
                 raw = sanitized,
                 confidence = 0.7f
-            )?.copy(category = "Debt")
+            )?.copy(
+                category = "Debt",
+                subcategory = if (low0.contains("fuliza")) "Fuliza repayment" else ""
+            )
         }
 
 
@@ -921,7 +962,7 @@ object MpesaParser {
                 type = TransactionType.EXPENSE,
                 raw = sanitized,
                 confidence = 0.75f
-            )?.copy(category = "Debt")
+            )?.copy(category = "Debt", subcategory = "Fuliza repayment")
         }
 
 
@@ -1291,7 +1332,7 @@ object MpesaParser {
             return buildPending(
                 code = null,
                 amountStr = matcher.group(2),
-                party = "Safaricom Bundles",
+                party = "Safaricom Data",
                 dateStr = null,
                 timeStr = null,
                 type = TransactionType.EXPENSE,
@@ -1483,15 +1524,35 @@ object MpesaParser {
                 parseDateTime(dateStr ?: harvested.first, timeStr ?: harvested.second)
             }
 
+            val ziidiMovement = merchant.contains("ziidi", ignoreCase = true)
+            val safaricomData = type == TransactionType.EXPENSE &&
+                merchant.contains("safaricom", ignoreCase = true) &&
+                Regex("(?i)\\b(bundle|bundles|data)\\b").containsMatchIn(raw)
             PendingTransaction(
                 amount = rawAmount,
                 type = type,
-                category = inferCategory(merchant, type),
+                category = when {
+                    ziidiMovement -> "Savings"
+                    safaricomData -> "Data"
+                    else -> inferCategory(merchant, type)
+                },
                 // Fee flag rides subcategory, leaving displayMerchant /
                 // displayCategory free for identity memory (alias + learned
                 // category stamped by the scan pipeline, not the parser).
-                subcategory = if (isCost) "Transaction Cost" else "",
-                merchant = merchant,
+                subcategory = when {
+                    isCost -> "Transaction Cost"
+                    merchant.contains("Fuliza", ignoreCase = true) && type == TransactionType.INCOME -> "Borrowed funds"
+                    merchant.contains("Fuliza", ignoreCase = true) && type == TransactionType.EXPENSE -> "Fuliza repayment"
+                    ziidiMovement -> "Ziidi transfer"
+                    else -> ""
+                },
+                merchant = when {
+                    safaricomData && !code.isNullOrBlank() -> "Safaricom"
+                    safaricomData -> "Safaricom Data"
+                    ziidiMovement && !code.isNullOrBlank() -> "M-Pesa Ziidi"
+                    ziidiMovement -> "Ziidi"
+                    else -> merchant
+                },
                 dateTimestamp = timestamp,
                 paymentMethod = method,
                 source = TransactionSource.MPESA_SMS,
@@ -1563,14 +1624,16 @@ object MpesaParser {
     fun inferCategory(merchant: String, type: TransactionType): String {
         val lower = merchant.lowercase()
         // Transfers and loans first — they beat the INCOME default below.
-        if (lower.contains("fuliza")) return "Other"
+        if (lower.contains("fuliza")) return "Debt"
+        if (lower.contains("ziidi")) return "Savings"
         if (lower.contains("m-shwari") || lower.contains("mshwari")) return "Savings"
         if (lower.contains("sacco")) return "Savings"
         if (lower.contains("loan") || lower.contains("tala") || lower.contains("branch") || lower.contains("zenka") || lower.contains("mkopa") || lower.contains("m-kopa") || lower.contains("hustler")) return "Debt"
         if (lower.contains("transfer") || lower.contains("agent") || lower.contains("pochi") || lower.contains("kcb") || lower.contains("equity") || lower.contains("absa") || lower.contains("stanbic") || lower.contains("co-op") || lower.contains("coop") || lower.contains("family") || lower.contains("dtb") || lower.contains("ncba") || lower.contains("bank")) return "Transfers"
         if (type == TransactionType.INCOME) return "Salary"
         return when {
-            lower.contains("safaricom") || lower.contains("airtime") || lower.contains("bundle") || lower.contains("data") || lower.contains("okoa") || lower.contains("saf") -> "Airtime"
+            lower.contains("bundle") || lower.contains("data") -> "Data"
+            lower.contains("safaricom") || lower.contains("airtime") || lower.contains("okoa") || lower.contains("saf") -> "Airtime"
             lower.contains("kplc") || lower.contains("token") || lower.contains("electric") -> "Electricity"
             lower.contains("supermarket") || lower.contains("naivas") || lower.contains("quickmart") || lower.contains("carrefour") || lower.contains("chandarana") || lower.contains("duka") || lower.contains("jumia") || lower.contains("kilimall") || lower.contains("jiji") || lower.contains("eastmatt") || lower.contains("cleanshelf") || lower.contains("magunas") || lower.contains("kibo") || lower.contains("lipa mdogo") -> "Shopping"
             // Bookshops are School, not print shops — checked before "book".

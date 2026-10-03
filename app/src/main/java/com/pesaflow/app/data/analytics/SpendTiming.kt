@@ -17,7 +17,7 @@ fun paydaySplurge(rows: List<LedgerRow>, minPaydays: Int = 2): SplurgeReport? {
     // Demo rows and onboarding equity are not paydays: pocket + upkeep seeded
     // together used to fake a 2-payday splurge in every onboarding month.
     val live = rows.filter { !it.isSample && !it.isOpening }
-    val incomes = live.filter { it.type == TransactionType.INCOME && it.amount > 0 }
+    val incomes = live.filter { it.type == TransactionType.INCOME && it.earnedIncome && it.amount > 0 }
         .sortedBy { it.ts }
     if (incomes.size < minPaydays) return null
     val expenses = live.filter { it.type == TransactionType.EXPENSE && it.amount > 0 }

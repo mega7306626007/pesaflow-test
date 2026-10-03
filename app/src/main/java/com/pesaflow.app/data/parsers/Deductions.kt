@@ -21,7 +21,8 @@ data class LedgerRow(
     // onboarding-equity rows instead of treating them as habits/paydays.
     // Defaulted: all existing call sites compile untouched.
     val isSample: Boolean = false,
-    val isOpening: Boolean = false
+    val isOpening: Boolean = false,
+    val earnedIncome: Boolean = true
 )
 
 enum class HypothesisKind { FARE, RENT, RECURRING }

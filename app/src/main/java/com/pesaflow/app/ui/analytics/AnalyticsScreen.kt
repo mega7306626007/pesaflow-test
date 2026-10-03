@@ -33,7 +33,10 @@ fun AnalyticsScreen(
         item {
             PpCard(kind = PpCardKind.LARGE) {
                 Column(verticalArrangement = Arrangement.spacedBy(ppSpacing.sm)) {
-                    PpSectionHeader(title = "$periodDays-day overview")
+                    PpSectionHeader(
+                        title = "$periodDays-day overview",
+                        subtitle = "Activity logged on ${report.activityDays} of $periodDays days · missing records can change these insights"
+                    )
                     AnalyticsFigure(label = "Total spent", value = "KSh ${report.totalSpent.toInt()}", primary = true)
                     AnalyticsFigure(label = "Total income", value = "KSh ${report.totalIncome.toInt()}")
                     AnalyticsFigure(label = "Net flow", value = "KSh ${report.netFlow.toInt()}")

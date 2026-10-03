@@ -895,7 +895,14 @@ fun DashboardScreen(
                 )
             }
             item {
-                SafeToSpendCard(transactions = transactions, budgets = budgets, goals = savingsGoals, bills = bills, hide = hideBalances)
+                SafeToSpendCard(
+                    transactions = transactions,
+                    budgets = budgets,
+                    goals = savingsGoals,
+                    bills = bills,
+                    flexibleCash = financialSnapshot.flexible.toDouble(),
+                    hide = hideBalances
+                )
             }
             }
 

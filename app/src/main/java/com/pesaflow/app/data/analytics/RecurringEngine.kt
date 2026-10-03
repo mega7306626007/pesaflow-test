@@ -2,6 +2,7 @@ package com.pesaflow.app.data.analytics
 
 import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
 
 /**
  * Recurring transaction engine: pure Kotlin, no Android imports.
@@ -136,7 +137,7 @@ fun predictPaydays(
     now: Long = System.currentTimeMillis()
 ): List<Triple<String, Double, Long>> {
     val dayMs = 24L * 60 * 60 * 1000
-    return txs.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }
+    return txs.filter { it.isEarnedIncome() && !it.isSample }
         .groupBy { it.merchant.trim().lowercase() }
         .mapNotNull { (_, list) ->
             if (list.size < 2) return@mapNotNull null

@@ -2,6 +2,7 @@ package com.pesaflow.app.data.analytics
 
 import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
 import com.pesaflow.app.data.time.addDays
 import com.pesaflow.app.data.time.mondayIndex
 import com.pesaflow.app.data.time.rollingDays
@@ -47,6 +48,7 @@ data class SpendingHeatmap(
 
 data class AnalyticsReport(
     val periodDays: Int,
+    val activityDays: Int,
     val totalSpent: Double,
     val totalIncome: Double,
     val netFlow: Double,
@@ -86,7 +88,12 @@ fun buildAnalyticsReport(
     val window = rollingDays(now, periodDays.coerceAtLeast(1))
     val inWindow = allTxs.filter { it.dateTimestamp in window && it.dateTimestamp <= now }
     val expenses = inWindow.filter { it.type == TransactionType.EXPENSE && !it.isSample }
-    val incomes = inWindow.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }
+    val incomes = inWindow.filter { it.isEarnedIncome() && !it.isSample }
+    val activityDays = inWindow.filter { !it.isSample && !it.isOpening }.map { tx ->
+        Calendar.getInstance().apply { timeInMillis = tx.dateTimestamp }.let {
+            "%04d-%02d-%02d".format(it.get(Calendar.YEAR), it.get(Calendar.MONTH), it.get(Calendar.DAY_OF_MONTH))
+        }
+    }.distinct().size
     val totalSpent = expenses.sumOf { it.amount }
     val totalIncome = incomes.sumOf { it.amount }
 
@@ -168,6 +175,7 @@ fun buildAnalyticsReport(
 
     return AnalyticsReport(
         periodDays = periodDays,
+        activityDays = activityDays,
         totalSpent = totalSpent,
         totalIncome = totalIncome,
         netFlow = totalIncome - totalSpent,

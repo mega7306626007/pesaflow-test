@@ -2,6 +2,7 @@ package com.pesaflow.app.data.finance
 
 import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
 import com.pesaflow.app.data.money.openingBasis
 import kotlin.math.ceil
 
@@ -44,7 +45,7 @@ fun calculateSemesterRunway(
         profileFunding = startingFunding.coerceAtLeast(0.0)
     )
     val income = rows
-        .filter { it.type == TransactionType.INCOME && !it.isOpening }
+        .filter { it.isEarnedIncome() }
         .sumOf { it.amount }
     val outflows = rows.filter {
         it.type == TransactionType.EXPENSE ||
@@ -52,7 +53,7 @@ fun calculateSemesterRunway(
             it.type == TransactionType.INVESTMENT
     }.sumOf { it.amount }
 
-    val remaining = openingFunds + income - outflows
+    val remaining = openingFunds + income - outflows - fulizaOutstanding(rows)
     val available = remaining - committed.coerceAtLeast(0.0)
     val isUpcoming = now < startTimestamp
     val isEnded = now >= endTimestamp

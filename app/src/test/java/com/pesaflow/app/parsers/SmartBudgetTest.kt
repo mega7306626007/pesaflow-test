@@ -5,6 +5,7 @@ import com.pesaflow.app.data.models.Bill
 import com.pesaflow.app.ui.budgets.BudgetRule
 import com.pesaflow.app.ui.budgets.Persona
 import com.pesaflow.app.ui.budgets.monthlyBillReserve
+import com.pesaflow.app.ui.budgets.recommendedBudgetPeriod
 import com.pesaflow.app.ui.budgets.smartBudget
 import org.junit.Assert.*
 import org.junit.Test
@@ -95,5 +96,27 @@ class SmartBudgetTest {
             category = "School"
         )
         assertEquals(16000, monthlyBillReserve(fee, now))
+    }
+
+    @Test
+    fun `cash runway recommends daily or weekly without pretending future funds are available`() {
+        assertEquals(BudgetType.DAILY, recommendedBudgetPeriod(500.0, 100.0))
+        assertEquals(BudgetType.WEEKLY, recommendedBudgetPeriod(1200.0, 100.0))
+        assertEquals(BudgetType.MONTHLY, recommendedBudgetPeriod(4000.0, 100.0))
+        assertEquals(BudgetType.DAILY, recommendedBudgetPeriod(4000.0, 100.0, daysUntilNextIncome = 3))
+        assertEquals(BudgetType.WEEKLY, recommendedBudgetPeriod(4000.0, 100.0, daysUntilNextIncome = 20))
+        assertNull(recommendedBudgetPeriod(1000.0, 0.0))
+    }
+
+    @Test
+    fun `cash constrained suggestions never exceed this periods actual cash`() {
+        val result = smartBudget(
+            monthlyBase = 2000.0,
+            rule = BudgetRule.CAMPUS,
+            period = BudgetType.WEEKLY,
+            persona = Persona.PARENTS_FAR,
+            periodBudgetCap = 400.0
+        )
+        assertTrue(result.suggestions.sumOf { it.amount } <= 400)
     }
 }

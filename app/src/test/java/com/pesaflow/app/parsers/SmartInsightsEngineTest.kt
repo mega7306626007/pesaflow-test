@@ -67,14 +67,44 @@ class SmartInsightsEngineTest {
 
     @Test
     fun `dust baseline gets absolutes never fantasy percents`() {
+        val today = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH)
         val txs = listOf(
-            txAt(5000.0, TransactionType.EXPENSE, "Food", monthTs(0, 5)),
-            txAt(12.0, TransactionType.EXPENSE, "Food", monthTs(-1, 20))
+            txAt(5000.0, TransactionType.EXPENSE, "Food", monthTs(0, today)),
+            txAt(12.0, TransactionType.EXPENSE, "Food", monthTs(-1, today))
         )
         val out = buildInsights(txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList())
         val mom = out.first { it.contains("last month") }
         assertTrue(mom.contains("vs KSh"))
         assertFalse(mom.contains("%"))
+    }
+
+    @Test
+    fun `month comparison uses matching month to date window`() {
+        val today = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH)
+        val previous = java.util.Calendar.getInstance().apply {
+            add(java.util.Calendar.MONTH, -1)
+            set(java.util.Calendar.DAY_OF_MONTH, minOf(today, getActualMaximum(java.util.Calendar.DAY_OF_MONTH)))
+            set(java.util.Calendar.HOUR_OF_DAY, 12)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val current = monthTs(0, today)
+        val laterDay = today + 1
+        val previousMonthMax = java.util.Calendar.getInstance().apply { timeInMillis = previous }
+            .getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+        val beyondMonthToDate = java.util.Calendar.getInstance().apply {
+            timeInMillis = previous
+            set(java.util.Calendar.DAY_OF_MONTH, if (laterDay <= previousMonthMax) laterDay else previousMonthMax)
+        }.timeInMillis
+        val txs = listOf(
+            txAt(50.0, TransactionType.EXPENSE, "Food", current),
+            txAt(50.0, TransactionType.EXPENSE, "Food", previous),
+            txAt(if (laterDay <= previousMonthMax) 20_000.0 else 0.0, TransactionType.EXPENSE, "Food", beyondMonthToDate)
+        )
+        val comparison = buildInsights(txs, emptyList(), AppLanguage.ENGLISH, "", emptyList(), emptyList(), emptyList())
+            .first { it.contains("same days last month") }
+        assertTrue(comparison, comparison.contains("KSh 50 month-to-date vs KSh 50"))
     }
 
     @Test

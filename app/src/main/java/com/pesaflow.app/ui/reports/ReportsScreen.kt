@@ -23,6 +23,7 @@ import com.pesaflow.app.data.models.Budget
 import com.pesaflow.app.data.models.Debt
 import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
 import com.pesaflow.app.data.notifications.ReminderScheduler
 import com.pesaflow.app.ui.theme.AtmoType
 import com.pesaflow.app.ui.theme.AtmoWorkspace
@@ -290,7 +291,7 @@ fun CampusLensRow(
     val runwayValue = if (runwayDays < 0) "—" else "$runwayDays d"
     val runwaySub = Copy4("days at this burn", "siku kwa mwendo huu", "days kwa hii pace", "days kwa hii pace").pick(lang)
 
-    val topIncome = transactions.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }
+    val topIncome = transactions.filter { it.isEarnedIncome() && !it.isSample }
         .groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
         .maxByOrNull { it.value }
     val hustleValue = topIncome?.let { moneySpoken(it.value, lang) } ?: "—"
@@ -427,7 +428,7 @@ fun DailyReportContent(transactions: List<Transaction>) {
     val now = System.currentTimeMillis()
     val start = dayStartOf(now)
     val today = transactions.filter { it.dateTimestamp >= start && !it.isSample }
-    val income = today.filter { it.type == TransactionType.INCOME && !it.isOpening }.sumOf { it.amount }
+    val income = today.filter { it.isEarnedIncome() }.sumOf { it.amount }
     val expenses = today.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
     val top = today.filter { it.type == TransactionType.EXPENSE }
         .groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
@@ -491,7 +492,7 @@ fun WeeklyReportContent(transactions: List<Transaction>) {
     val elapsed = daysElapsedInWeek(now).coerceAtLeast(1)
     fun inWeekToDate(ts: Long) = ts in week && inPastOrNow(ts, now)
     val weekTx = transactions.filter { inWeekToDate(it.dateTimestamp) && !it.isSample }
-    val income = weekTx.filter { it.type == TransactionType.INCOME && !it.isOpening }.sumOf { it.amount }
+    val income = weekTx.filter { it.isEarnedIncome() }.sumOf { it.amount }
     val expenses = weekTx.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
     val prevExpenses = transactions.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp in prevWeek }.sumOf { it.amount }
     val weekVsPrev = changeVsPrevious(expenses, prevExpenses)
@@ -697,7 +698,7 @@ fun SemesterReportContent(transactions: List<Transaction>) {
     val now = System.currentTimeMillis()
     val start = now - 120 * DAY_MS
     val window = transactions.filter { it.dateTimestamp >= start && !it.isSample }
-    val income = window.filter { it.type == TransactionType.INCOME && !it.isOpening }.sumOf { it.amount }
+    val income = window.filter { it.isEarnedIncome() }.sumOf { it.amount }
     val expenses = window.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
     val top3 = window.filter { it.type == TransactionType.EXPENSE }
         .groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
@@ -721,7 +722,7 @@ fun AnnualReportContent(transactions: List<Transaction>) {
         val c = java.util.Calendar.getInstance().apply { timeInMillis = it.dateTimestamp }
         c.get(java.util.Calendar.YEAR) == year && !it.isSample
     }
-    val income = window.filter { it.type == TransactionType.INCOME && !it.isOpening }.sumOf { it.amount }
+    val income = window.filter { it.isEarnedIncome() }.sumOf { it.amount }
     val expenses = window.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
     val top3 = window.filter { it.type == TransactionType.EXPENSE }
         .groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }

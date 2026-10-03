@@ -7,6 +7,7 @@ import com.pesaflow.app.data.models.Debt
 import com.pesaflow.app.data.models.SavingsGoal
 import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
 import com.pesaflow.app.data.time.changeVsPrevious
 import com.pesaflow.app.data.time.isDustBaseline
 import com.pesaflow.app.ui.budgets.Persona
@@ -100,7 +101,7 @@ watched: Set<String> = emptySet()
     val monthTotal = monthExp.sumOf { it.amount }
     // Earned income only — onboarding opening rows are held cash, and counting
     // them here broke the overspend alarm + savings rate every onboarding month.
-    val monthIncome = txs.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening && inMonth(it.dateTimestamp) }.sumOf { it.amount }
+    val monthIncome = txs.filter { it.isEarnedIncome() && !it.isSample && inMonth(it.dateTimestamp) }.sumOf { it.amount }
     if (monthTotal <= 0) return listOf(t(
         "No spending this month yet.",
         "Hujaspend this month.",
@@ -123,7 +124,10 @@ watched: Set<String> = emptySet()
     // data stays silent — the engine only speaks with 5+ rows and 35%+.
     com.pesaflow.app.data.analytics.hourlyPeak(
         txs.filter { !it.isSample }.map {
-            com.pesaflow.app.data.parsers.LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp, it.isSample, it.isOpening)
+            com.pesaflow.app.data.parsers.LedgerRow(
+                it.amount, it.type, it.category, it.merchant, it.dateTimestamp,
+                it.isSample, it.isOpening, it.isEarnedIncome()
+            )
         }
     )?.let { hp ->
         val h = com.pesaflow.app.data.analytics.hourLabel(hp.peakStartHour)
@@ -137,7 +141,10 @@ watched: Set<String> = emptySet()
     // the spending until the next one — no double-counting.
     com.pesaflow.app.data.analytics.paydaySplurge(
         txs.filter { !it.isSample }.map {
-            com.pesaflow.app.data.parsers.LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp, it.isSample, it.isOpening)
+            com.pesaflow.app.data.parsers.LedgerRow(
+                it.amount, it.type, it.category, it.merchant, it.dateTimestamp,
+                it.isSample, it.isOpening, it.isEarnedIncome()
+            )
         }
     )?.let { splurge ->
         if (splurge.paydays >= 2 && splurge.avgPctSpent7d >= 60) {
@@ -154,7 +161,10 @@ watched: Set<String> = emptySet()
     run {
         val dim = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
         val dom = cal.get(Calendar.DAY_OF_MONTH)
-        if (dom >= 2 && dim > dom) {
+        val activeDays = monthExp.map { tx ->
+            Calendar.getInstance().apply { timeInMillis = tx.dateTimestamp }.get(Calendar.DAY_OF_MONTH)
+        }.toSet().size
+        if (dom >= 7 && activeDays >= 4 && dim > dom) {
             val projected = monthTotal / dom * dim
             val allLimit = budgets.firstOrNull { it.category == "ALL" }?.limitAmount ?: 0.0
             if (allLimit > 0) {
@@ -264,29 +274,33 @@ watched: Set<String> = emptySet()
 
     // Month-over-month change. Dust baselines get absolutes — a percent off
     // KSh 12 last month is noise ("up 4000000%"), never insight.
-    val lastTotal = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && inMonth(it.dateTimestamp, -1) }.sumOf { it.amount }
+    val currentDay = cal.get(Calendar.DAY_OF_MONTH)
+    val lastTotal = txs.filter {
+        it.type == TransactionType.EXPENSE && !it.isSample && inMonth(it.dateTimestamp, -1) &&
+            Calendar.getInstance().apply { timeInMillis = it.dateTimestamp }.get(Calendar.DAY_OF_MONTH) <= currentDay
+    }.sumOf { it.amount }
     if (lastTotal > 0) {
         val top = monthExp.groupBy { it.category }.maxByOrNull { e -> e.value.sumOf { it.amount } }?.key ?: "spending"
         if (isDustBaseline(lastTotal)) {
             out.add(t(
-                "KSh ${monthTotal.toInt()} vs KSh ${lastTotal.toInt()} last month — too little history for a percent. Watch $top. 📊",
-                "KSh ${monthTotal.toInt()} vs KSh ${lastTotal.toInt()} last month — history kidogo sana kwa percent. Watch $top. 📊",
-                "KSh ${monthTotal.toInt()} dhidi ya KSh ${lastTotal.toInt()} mwezi uliopita — historia kidogo mno kwa asilimia. Angalia $top. 📊",
-                "KSh ${monthTotal.toInt()} vs KSh ${lastTotal.toInt()} last month — history kidogo for %. Watch $top. 📊"
+                "KSh ${monthTotal.toInt()} month-to-date vs KSh ${lastTotal.toInt()} for the same days last month — too little history for a percent. Watch $top. 📊",
+                "KSh ${monthTotal.toInt()} month-to-date vs KSh ${lastTotal.toInt()} for the same days last month — history kidogo sana kwa percent. Watch $top. 📊",
+                "KSh ${monthTotal.toInt()} hadi sasa dhidi ya KSh ${lastTotal.toInt()} kwa siku hizo mwezi uliopita — historia kidogo mno kwa asilimia. Angalia $top. 📊",
+                "KSh ${monthTotal.toInt()} month-to-date vs KSh ${lastTotal.toInt()} for those same days — history kidogo for %. Watch $top. 📊"
             ))
         } else {
             val change = changeVsPrevious(monthTotal, lastTotal) ?: 0
             out.add(
                 if (change > 0) t(
-                    "Up $change% vs last month. Watch $top. 📈",
-                    "Ime Panda $change% vs last month. Watch $top. 📈",
-                    "Juu $change% kuliko mwezi uliopita. Angalia $top. 📈",
-                    "Up $change% vs last month. Watch $top. 📈"
+                    "Up $change% vs the same days last month. Watch $top. 📈",
+                    "Ime Panda $change% vs siku hizo mwezi uliopita. Watch $top. 📈",
+                    "Juu $change% dhidi ya siku hizo mwezi uliopita. Angalia $top. 📈",
+                    "Up $change% vs the same days last month. Watch $top. 📈"
                 ) else t(
-                    "Down ${-change}% vs last month. Good job! 📉",
-                    "Imeshuka ${-change}%. Poa sana! 📉",
-                    "Chini ${-change}%. Kazi nzuri! 📉",
-                    "Down ${-change}%. Poa! 📉"
+                    "Down ${-change}% vs the same days last month. Good job! 📉",
+                    "Imeshuka ${-change}% dhidi ya siku hizo mwezi uliopita. Poa sana! 📉",
+                    "Chini ${-change}% dhidi ya siku hizo mwezi uliopita. Kazi nzuri! 📉",
+                    "Down ${-change}% vs those same days last month. Poa! 📉"
                 )
             )
         }

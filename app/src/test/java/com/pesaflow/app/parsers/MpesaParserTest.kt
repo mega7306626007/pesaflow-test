@@ -3,6 +3,7 @@ package com.pesaflow.app.parsers
 import com.pesaflow.app.data.models.PaymentMethod
 import com.pesaflow.app.data.models.TransactionSource
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
 import com.pesaflow.app.data.parsers.MpesaParser
 import org.junit.Assert.*
 import org.junit.Test
@@ -112,7 +113,7 @@ class MpesaParserTest {
         assertNotNull(tx)
         assertEquals(99.0, tx!!.amount, 0.001)
         assertEquals(TransactionType.EXPENSE, tx.type)
-        assertEquals("Airtime", tx.category)
+        assertEquals("Data", tx.category)
     }
 
     @Test
@@ -133,6 +134,7 @@ class MpesaParserTest {
         assertEquals(1000.0, tx!!.amount, 0.001)
         assertEquals(TransactionType.INCOME, tx.type)
         assertEquals("Transfers", tx.category)
+        assertFalse(tx.isEarnedIncome())
     }
 
     @Test
@@ -142,6 +144,30 @@ class MpesaParserTest {
         assertNotNull(tx)
         assertEquals(500.0, tx!!.amount, 0.001)
         assertEquals(TransactionType.INCOME, tx.type)
+        assertEquals("Borrowed funds", tx.subcategory)
+    }
+
+    @Test
+    fun `ziidi saving and withdrawal are distinct non-earned movements`() {
+        val deposit = MpesaParser.parseMessage("You have deposited KSh1,000.00 to Ziidi on 12/9/26 at 10:30 AM")
+        val withdrawal = MpesaParser.parseMessage("You have withdrawn KSh300.00 from Ziidi to M-PESA on 12/9/26 at 10:30 AM")
+        assertNotNull(deposit)
+        assertNotNull(withdrawal)
+        assertEquals(TransactionType.SAVING, deposit!!.type)
+        assertEquals(TransactionType.INCOME, withdrawal!!.type)
+        assertEquals("Ziidi transfer", withdrawal.subcategory)
+        assertFalse(withdrawal.isEarnedIncome())
+    }
+
+    @Test
+    fun `safaricom bundle alert is categorized as data`() {
+        val tx = MpesaParser.parseMessage(
+            "Confirmed. You have bought 1GB bundles for KSh99.00. Dial *544# for balance.",
+            "SAFARICOM"
+        )
+        assertNotNull(tx)
+        assertEquals("Data", tx!!.category)
+        assertEquals("Safaricom Data", tx.merchant)
     }
 
     @Test
@@ -307,6 +333,7 @@ class MpesaParserTest {
         assertEquals(200.0, tx!!.amount, 0.001)
         assertEquals(TransactionType.EXPENSE, tx.type)
         assertEquals("Debt", tx.category)
+        assertEquals("Fuliza repayment", tx.subcategory)
     }
 
     @Test

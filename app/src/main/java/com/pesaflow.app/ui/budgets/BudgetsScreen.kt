@@ -42,6 +42,8 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
     val transactions by viewModel.allTransactions.collectAsState()
     val savingsGoals by viewModel.savingsGoals.collectAsState()
     val monthlyIncome by viewModel.monthlyIncome.collectAsState()
+    val financialSnapshot by viewModel.financialSnapshot.collectAsState()
+    val incomeSources by viewModel.incomeSources.collectAsState()
     val allBills by viewModel.bills.collectAsState()
     var tab by remember { mutableStateOf("Monthly") }
     // Prefill once from detected income (ledger month, else declared
@@ -51,6 +53,7 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
     var calcIncome by remember(detectedBase) { mutableStateOf(detectedBase?.toInt()?.toString() ?: "") }
     var calcRule by remember { mutableStateOf("Student") }
     var calcPeriod by remember { mutableStateOf(BudgetType.MONTHLY) }
+    var calcCashBasis by remember { mutableStateOf(false) }
     var calcStyle by remember { mutableStateOf(LifestylePreset.BALANCED) }
     // Proof tick for Apply: brief ✓ that reverts so re-apply stays possible.
     val ackScope = rememberCoroutineScope()
@@ -165,11 +168,64 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    val dailyNeed = financialSnapshot.essentialAhead.toDouble() / 30.0
+                    val daysUntilIncome = com.pesaflow.app.data.income.nextInflowDay(incomeSources, now)
+                    val cashRecommendation = recommendedBudgetPeriod(
+                        financialSnapshot.flexible.toDouble(),
+                        dailyNeed,
+                        daysUntilIncome
+                    )
+                    val recommendationWindow = cashRecommendation?.takeIf {
+                        it == BudgetType.DAILY || it == BudgetType.WEEKLY
+                    }?.let { com.pesaflow.app.data.finance.budgetWindowRange(it, now) }
+                    val calendarDaysRemaining = recommendationWindow?.let {
+                        kotlin.math.ceil((it.endExclusive - now).coerceAtLeast(0L).toDouble() / day)
+                            .toInt().coerceAtLeast(1)
+                    }
+                    val recommendationDays = calendarDaysRemaining?.let { calendarDays ->
+                        val periodDays = if (cashRecommendation == BudgetType.DAILY) 1 else calendarDays
+                        minOf(periodDays, daysUntilIncome?.coerceAtLeast(1) ?: periodDays)
+                    }
+                    val recommendationSpent = recommendationWindow?.let { window ->
+                        transactions.filter {
+                            it.type == TransactionType.EXPENSE && !it.isSample &&
+                                it.dateTimestamp in window && it.dateTimestamp <= now
+                        }.sumOf { it.amount }
+                    } ?: 0.0
+                    val recommendedCash = recommendationDays?.let { safeDays ->
+                        (recommendationSpent + minOf(
+                            financialSnapshot.flexible.toDouble(),
+                            dailyNeed * safeDays
+                        )).toInt().coerceAtLeast(0)
+                    }
+                    if (cashRecommendation == BudgetType.DAILY || cashRecommendation == BudgetType.WEEKLY) {
+                        Text(
+                            "You have KSh ${financialSnapshot.flexible.toDouble().toInt()} flexible after commitments; " +
+                            "KSh ${recommendationSpent.toInt()} is already spent in this period. " +
+                            "At about KSh ${dailyNeed.toInt()} per essential day, plan for ${recommendationDays ?: 1} day(s) " +
+                            "and stop before the next expected income${daysUntilIncome?.let { " in $it day(s)" } ?: ""}. " +
+                            "That date is an estimate, not money you already have.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(
+                            onClick = {
+                                calcPeriod = cashRecommendation
+                                calcIncome = (recommendedCash ?: 0).toString()
+                                calcCashBasis = true
+                            },
+                            enabled = (recommendedCash ?: 0) > 0
+                        ) {
+                            Text(
+                                "Plan ${if (cashRecommendation == BudgetType.DAILY) "today's" else "this week's"} available cash"
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = calcIncome,
                         onValueChange = { calcIncome = it },
-                        label = { Text("Monthly income (KSh)") },
+                        label = { Text(if (calcCashBasis) "Available for this period (KSh)" else "Monthly income (KSh)") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -197,7 +253,11 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                         listOf(BudgetType.DAILY, BudgetType.WEEKLY, BudgetType.MONTHLY, BudgetType.SEMESTER, BudgetType.ANNUAL).forEach { t ->
                             FilterChip(
                                 selected = calcPeriod == t,
-                                onClick = { calcPeriod = t },
+                                onClick = {
+                                    if (calcCashBasis) calcIncome = detectedBase?.toInt()?.toString() ?: ""
+                                    calcPeriod = t
+                                    calcCashBasis = false
+                                },
                                 label = { Text(t.name.take(5)) }
                             )
                         }
@@ -219,7 +279,7 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (calcPeriod == BudgetType.DAILY) {
+                    if (calcPeriod == BudgetType.DAILY && !calcCashBasis) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
@@ -233,18 +293,20 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                     val monthlyBudgetsTotal = com.pesaflow.app.data.finance.masterOrCategoryTotal(budgets, BudgetType.MONTHLY)
                     // Expected income from More → Income (HELB, parents, hustle...) backs the
                     // base when the ledger is still empty early in the month.
-                    val incomeSources by viewModel.incomeSources.collectAsState()
                     val expectedIncome = incomeSources.sumOf { com.pesaflow.app.data.income.IncomeSourceStore.budgetedMonthly(it) }.takeIf { it > 0 }
-                    val calcBase = if (calcPeriod == BudgetType.DAILY && autoDaily && monthlyBudgetsTotal > 0) {
+                    val enteredBase = calcIncome.toDoubleOrNull()?.takeIf { it > 0 }
+                    val calcBase = if (calcCashBasis) {
+                        enteredBase?.div(periodScale(calcPeriod))
+                    } else if (calcPeriod == BudgetType.DAILY && autoDaily && monthlyBudgetsTotal > 0) {
                         monthlyBudgetsTotal
                     } else {
-                        calcIncome.toDoubleOrNull()?.takeIf { it > 0 } ?: monthlyIncome.takeIf { it > 0 } ?: expectedIncome
+                        enteredBase ?: monthlyIncome.takeIf { it > 0 } ?: expectedIncome
                     }
                     if (calcBase != null) {
                         // Rebudget nudge: income moved >25% since the saved
                         // monthly envelope — one tap recalculates, never auto.
                         val monthlyAllLimit = budgets.firstOrNull { it.category == "ALL" && it.type == BudgetType.MONTHLY }?.limitAmount ?: 0.0
-                        if (monthlyAllLimit > 0 && kotlin.math.abs(calcBase - monthlyAllLimit) / monthlyAllLimit > 0.25) {
+                        if (!calcCashBasis && monthlyAllLimit > 0 && kotlin.math.abs(calcBase - monthlyAllLimit) / monthlyAllLimit > 0.25) {
                             TextButton(onClick = { calcIncome = calcBase.toInt().toString() }) {
                                 Text("Income moved — recalculate from KSh ${calcBase.toInt()}?")
                             }
@@ -287,7 +349,8 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                             openBillByCategory = billMap,
                             avg90ByCategory = avgMap,
                             style = calcStyle,
-                            declaredByCategory = declaredMap
+                            declaredByCategory = if (calcCashBasis) emptyMap() else declaredMap,
+                            periodBudgetCap = if (calcCashBasis) enteredBase else null
                         )
                         // Daily auto mode still derives from monthly envelopes when present.
                         val periodName = plan.periodName
@@ -305,12 +368,15 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                             )
                         }
                         Text(
-                            plan.summary,
+                            if (calcCashBasis) {
+                                "Cash-constrained plan: KSh ${enteredBase?.toInt() ?: 0} maximum for this period. " +
+                                    "This uses current flexible cash, not expected future income."
+                            } else plan.summary,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         val plannedTotal = plan.suggestions.sumOf { it.amount }
-                        val periodBase = calcBase * periodScale(calcPeriod)
+                        val periodBase = if (calcCashBasis) enteredBase ?: 0.0 else calcBase * periodScale(calcPeriod)
                         if (plannedTotal > periodBase) {
                             Text(
                                 "Funding gap: this plan exceeds the entered base by KSh ${(plannedTotal - periodBase).toInt()}. " +
@@ -355,6 +421,7 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
+                            enabled = !calcCashBasis || plannedTotal <= periodBase.toInt(),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) { Text(if (applySig in acked) "Applied ${prioritized.size} ✓" else "Apply as $periodName Budgets", color = MaterialTheme.colorScheme.onPrimary) }
                     } else {

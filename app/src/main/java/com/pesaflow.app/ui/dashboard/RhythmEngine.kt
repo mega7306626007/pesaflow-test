@@ -4,6 +4,7 @@ import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
 import com.pesaflow.app.data.models.UserRhythm
 import com.pesaflow.app.data.models.RhythmKind
+import com.pesaflow.app.data.models.isEarnedIncome
 import com.pesaflow.app.data.repositories.FinanceRepository
 import com.pesaflow.app.ui.budgets.Persona
 import kotlinx.coroutines.flow.Flow
@@ -70,7 +71,7 @@ class RhythmEngine(
         fun domOf(ts: Long): Int =
             Calendar.getInstance().apply { timeInMillis = ts }.get(Calendar.DAY_OF_MONTH)
 
-        val incomeTxs = recent.filter { it.type == TransactionType.INCOME && !it.isOpening && !it.isSample }
+        val incomeTxs = recent.filter { it.isEarnedIncome() && !it.isSample }
         val expenseTxs = recent.filter { it.type == TransactionType.EXPENSE }
         val transportTxs = expenseTxs.filter { it.category.equals("Transport", ignoreCase = true) }
         val transportByDay = transportTxs.groupBy { it.dateTimestamp / (24L * 60 * 60 * 1000) }

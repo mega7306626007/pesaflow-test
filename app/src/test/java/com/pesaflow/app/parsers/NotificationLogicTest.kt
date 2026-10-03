@@ -145,7 +145,7 @@ class NotificationLogicTest {
     fun `mpesa parser categorizes expanded merchant names`() {
         assertEquals("Transport", com.pesaflow.app.data.parsers.MpesaParser.inferCategory("Matatu Fare", TransactionType.EXPENSE))
         assertEquals("Transport", com.pesaflow.app.data.parsers.MpesaParser.inferCategory("Uber Nairobi", TransactionType.EXPENSE))
-        assertEquals("Airtime", com.pesaflow.app.data.parsers.MpesaParser.inferCategory("Safaricom Bundle", TransactionType.EXPENSE))
+        assertEquals("Data", com.pesaflow.app.data.parsers.MpesaParser.inferCategory("Safaricom Bundle", TransactionType.EXPENSE))
         assertEquals("Food", com.pesaflow.app.data.parsers.MpesaParser.inferCategory("Kibanda Lunch", TransactionType.EXPENSE))
         assertEquals("Clothes", com.pesaflow.app.data.parsers.MpesaParser.inferCategory("Shirt Store", TransactionType.EXPENSE))
         assertEquals("Kujibamba", com.pesaflow.app.data.parsers.MpesaParser.inferCategory("Salon Beauty", TransactionType.EXPENSE))

@@ -19,6 +19,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.pesaflow.app.data.database.AppDatabase
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
 import com.pesaflow.app.data.time.addDays
 import com.pesaflow.app.data.time.changeVsPrevious
 import com.pesaflow.app.data.time.inPastOrNow
@@ -717,7 +718,7 @@ class SundayReportWorker(appContext: Context, params: WorkerParameters) : Corout
             val weekSpent = txs.filter { isExpense(it) && inWeek(it) }.sumOf { it.amount }
             val weekCount = txs.filter { isExpense(it) && inWeek(it) }.size
             val prevWeekSpent = txs.filter { isExpense(it) && it.dateTimestamp in prevWeek }.sumOf { it.amount }
-            val weekIncome = txs.filter { it.type == TransactionType.INCOME && !it.isOpening && inWeek(it) }.sumOf { it.amount }
+            val weekIncome = txs.filter { it.isEarnedIncome() && inWeek(it) }.sumOf { it.amount }
 
             val mpesaWeek = txs.filter { isExpense(it) && inWeek(it) && it.source == com.pesaflow.app.data.models.TransactionSource.MPESA_SMS }.sumOf { it.amount }
             val manualWeek = weekSpent - mpesaWeek
@@ -870,7 +871,7 @@ class DailyDigestWorker(appContext: Context, params: WorkerParameters) : Corouti
                 }.timeInMillis
                 fun isExp(t: com.pesaflow.app.data.models.Transaction) = t.type == TransactionType.EXPENSE && !t.isSample
                 val lastSpent = txs.filter { isExp(it) && it.dateTimestamp >= prevStart && it.dateTimestamp < monthStart }.sumOf { it.amount }
-                val lastIncome = txs.filter { it.type == TransactionType.INCOME && !it.isOpening && it.dateTimestamp >= prevStart && it.dateTimestamp < monthStart }.sumOf { it.amount }
+                val lastIncome = txs.filter { it.isEarnedIncome() && it.dateTimestamp >= prevStart && it.dateTimestamp < monthStart }.sumOf { it.amount }
                 val lastTop = txs.filter { isExp(it) && it.dateTimestamp >= prevStart && it.dateTimestamp < monthStart }
                     .groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
                     .maxByOrNull { it.value }
@@ -1113,7 +1114,7 @@ class MonthlyReportWorker(appContext: Context, params: WorkerParameters) : Corou
             }.timeInMillis
             fun isExp(t: com.pesaflow.app.data.models.Transaction) = t.type == TransactionType.EXPENSE && !t.isSample
             val spent = txs.filter { isExp(it) && it.dateTimestamp >= monthStart }.sumOf { it.amount }
-            val income = txs.filter { it.type == TransactionType.INCOME && !it.isOpening && it.dateTimestamp >= monthStart }.sumOf { it.amount }
+            val income = txs.filter { it.isEarnedIncome() && it.dateTimestamp >= monthStart }.sumOf { it.amount }
             val top3 = txs.filter { isExp(it) && it.dateTimestamp >= monthStart }
                 .groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
                 .entries.sortedByDescending { it.value }.take(3)

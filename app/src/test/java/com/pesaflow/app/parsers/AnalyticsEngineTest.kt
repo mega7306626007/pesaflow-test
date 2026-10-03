@@ -25,9 +25,22 @@ class AnalyticsEngineTest {
     fun `report with empty history`() {
         val r = buildAnalyticsReport(emptyList(), 30, now)
         assertEquals(0.0, r.totalSpent, 0.001)
+        assertEquals(0, r.activityDays)
         assertEquals(0, r.categorySummaries.size)
         assertEquals(0.0, r.dailyAvg, 0.001)
         assertTrue(r.netFlow >= 0)
+    }
+
+    @Test
+    fun `activity coverage counts only recorded non-sample days`() {
+        val txs = listOf(
+            tx(100.0, "Food", day(0)),
+            tx(200.0, "Food", day(1)),
+            tx(500.0, "Food", day(2)).copy(isSample = true),
+            tx(1000.0, "Opening", day(3), opening = true)
+        )
+        val report = buildAnalyticsReport(txs, 30, now)
+        assertEquals(2, report.activityDays)
     }
 
     @Test

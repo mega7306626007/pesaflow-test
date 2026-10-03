@@ -3,6 +3,7 @@ package com.pesaflow.app.data.academic
 import com.pesaflow.app.data.models.PendingTransaction
 import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
 import com.pesaflow.app.data.time.startOfDay as canonicalDayStart
 import com.pesaflow.app.data.time.startOfWeek as canonicalWeekStart
 import java.text.SimpleDateFormat
@@ -472,7 +473,7 @@ fun buildSpendProfile(rows: List<Transaction>, window: ScanWindow): SpendProfile
     var paydayAmount: Double? = null
     var paydayDay: Int? = null
     var paydayWho: String? = null
-    inWin.filter { it.type == TransactionType.INCOME && !it.isOpening && !it.isSample }
+    inWin.filter { it.isEarnedIncome() && !it.isSample }
         .groupBy { it.merchant.trim().lowercase() }
         .mapNotNull { (_, list) ->
             if (list.size < 2) return@mapNotNull null

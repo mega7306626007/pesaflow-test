@@ -46,14 +46,20 @@ fun NetWorthScreen(viewModel: FinanceViewModel) {
     val openingRows = real.filter { it.type == TransactionType.INCOME && it.isOpening }.sumOf { it.amount }
     val income = real.filter { it.type == TransactionType.INCOME && !it.isOpening }.sumOf { it.amount }
     val spent = real.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
-    val saved = real.filter { it.type == TransactionType.SAVING }.sumOf { it.amount }
+    val savingsDeposits = real.filter { it.type == TransactionType.SAVING }.sumOf { it.amount }
+    val ziidiWithdrawals = real.filter {
+        it.type == TransactionType.INCOME && it.subcategory.equals("Ziidi transfer", ignoreCase = true)
+    }.sumOf { it.amount }
+    val saved = savingsDeposits - ziidiWithdrawals
     val invested = real.filter { it.type == TransactionType.INVESTMENT }.sumOf { it.amount }
     val openingBasis = com.pesaflow.app.data.money.openingBasis(openingRows, opening)
     // Direction matters: money THEY owe me is an asset (+), money I owe is a
     // liability (−). Netting both as debt understated worth by 2× the lent sum.
-    val iOwe = debts.filter { it.status != "PAID" && it.direction == "I_OWE" }.sumOf { it.amount }
+    val personalOwed = debts.filter { it.status != "PAID" && it.direction == "I_OWE" }.sumOf { it.amount }
+    val fulizaOwed = com.pesaflow.app.data.finance.fulizaOutstanding(real)
+    val iOwe = personalOwed + fulizaOwed
     val theyOwe = debts.filter { it.status != "PAID" && it.direction != "I_OWE" }.sumOf { it.amount }
-    val cash = com.pesaflow.app.data.money.liquidCash(openingBasis, income, spent, saved, invested)
+    val cash = com.pesaflow.app.data.money.liquidCash(openingBasis, income, spent, savingsDeposits, invested)
     val netWorth = cash + saved + invested + theyOwe - iOwe
     val scale = maxOf(kotlin.math.abs(cash), saved, invested, theyOwe, iOwe, 1.0)
 
@@ -121,7 +127,8 @@ fun NetWorthScreen(viewModel: FinanceViewModel) {
                     VaultRow(label = "Savings", value = saved, fraction = (saved / scale).toFloat(), color = SkinVault.accent, skin = SkinVault)
                     VaultRow(label = "Investments", value = invested, fraction = (invested / scale).toFloat(), color = ChartPurple, skin = SkinVault)
                     VaultRow(label = "Owed to me", value = theyOwe, fraction = (theyOwe / scale).toFloat(), color = MaterialTheme.colorScheme.tertiary, skin = SkinVault)
-                    VaultRow(label = "I owe", value = -iOwe, fraction = (iOwe / scale).toFloat(), color = MaterialTheme.colorScheme.error, skin = SkinVault)
+                    VaultRow(label = "I owe", value = -personalOwed, fraction = (personalOwed / scale).toFloat(), color = MaterialTheme.colorScheme.error, skin = SkinVault)
+                    VaultRow(label = "Fuliza outstanding", value = -fulizaOwed, fraction = (fulizaOwed / scale).toFloat(), color = MaterialTheme.colorScheme.error, skin = SkinVault)
                     // M-Pesa wallet from the last SMS: display-only, never counted twice.
                     val walletCtx = LocalContext.current
                     com.pesaflow.app.data.parsers.readMpesaBalance(walletCtx)?.let { (wamt, wat) ->

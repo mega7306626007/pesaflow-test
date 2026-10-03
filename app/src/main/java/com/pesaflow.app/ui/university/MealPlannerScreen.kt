@@ -228,7 +228,7 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
     val mySpots by viewModel.places.collectAsState()
 
     val foodBudget = budgets.firstOrNull { it.category == "Food" }?.limitAmount
-    var monthlyFoodInput by remember { mutableStateOf(foodBudget?.toInt()?.toString() ?: viewModel.let { scannedMonthlyFoodOf(it.getOnboardingAnswers()) }?.toString() ?: "6000") }
+    var monthlyFoodInput by remember { mutableStateOf(foodBudget?.toInt()?.toString() ?: viewModel.let { scannedMonthlyFoodOf(it.getOnboardingAnswers()) }?.toString().orEmpty()) }
     var selectedPeriod by remember { mutableStateOf("Week") }
     var menu by remember { mutableStateOf<List<PlannedDay>>(emptyList()) }
 
@@ -341,7 +341,7 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
     var lunchReminder by remember { mutableStateOf(mealPrefs.getBoolean("lunch_reminder", false)) }
 
     val scannedFood = remember { scannedMonthlyFoodOf(viewModel.getOnboardingAnswers()) }
-    val monthlyFoodRaw = monthlyFoodInput.toDoubleOrNull()?.takeIf { it > 0 } ?: 6000.0
+    val monthlyFoodRaw = monthlyFoodInput.toDoubleOrNull()?.takeIf { it > 0 } ?: 0.0
     // Calibrated allowance: your real 90-day Food average caps the figure (×1.2 headroom)
     // unless you set a deliberate Food budget envelope — then your word wins.
     val foodAvg90 = ledgerTxns.filter {
@@ -434,6 +434,10 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
     fun generateMenu() {
         menuSig = "$sourceFilter|$maxPlate|$includeBreakfast|$includeLunch|$includeSupper|$people|$forceProtein|$selectedPeriod|$seed"
         checkedGroceries = emptySet()
+        if (monthlyFood <= 0.0) {
+            menu = emptyList()
+            return
+        }
         val mains = MEAL_TYPES.filter { it != "Snack" }.filter {
             (it != "Breakfast" || includeBreakfast) && (it != "Lunch" || includeLunch) && (it != "Supper" || includeSupper)
         }
@@ -689,16 +693,17 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                 SkinAccentLine(SkinMeals.accent)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "KSh " + dailyAllowance.toInt() + " / day",
+                    if (monthlyFood > 0) "KSh ${dailyAllowance.toInt()} / day" else "Food budget not set",
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    "KSh " + periodBudget.toInt() + " for " + periodDays + " days - menu KSh " + menuTotal.toInt() + if (overDays > 0) " (" + overDays + " over)" else " (fits)",
+                    if (monthlyFood > 0) "KSh " + periodBudget.toInt() + " for " + periodDays + " days - menu KSh " + menuTotal.toInt() + if (overDays > 0) " (" + overDays + " over)" else " (fits)"
+                    else "Set a Food amount before generating a budget-based menu.",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (overDays > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    color = if (monthlyFood > 0 && overDays > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                 )
                 if (priorityNames.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -719,19 +724,29 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     Text("Monthly Food Budget", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "KSh ${monthlyFood.toInt()} / month = KSh ${dailyAllowance.toInt()} per day" +
-                            (if (foodBudget != null) " (from your Food budget)" else if (scannedFood != null) " (from your M-Pesa scan - edit me)" else " (no Food budget set - using this figure)"),
+                        if (monthlyFood > 0) "KSh ${monthlyFood.toInt()} / month = KSh ${dailyAllowance.toInt()} per day" +
+                            (if (foodBudget != null) " (from your Food budget)" else if (scannedFood != null) " (from your M-Pesa scan - edit me)" else if (foodAvg90 > 0) " (based on recent Food spending)" else " (your estimate)")
+                        else "No food budget or spending estimate is available yet.",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = if (monthlyFood > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text(
-                        com.pesaflow.app.data.meals.mealTierLabel(
-                            com.pesaflow.app.data.meals.mealTier(dailyAllowance.toDouble())
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (monthlyFood <= 0) {
+                        Text(
+                            "Enter a monthly amount, or use your recorded spending below. The planner won't guess a budget.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (monthlyFood > 0) {
+                        Text(
+                            com.pesaflow.app.data.meals.mealTierLabel(
+                                com.pesaflow.app.data.meals.mealTier(dailyAllowance.toDouble())
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     // Onboarding context, read back: the grocery spot stated
                     // at setup surfaces where food money is planned.
                     val ctxFacts by viewModel.userContextFacts.collectAsState()
@@ -757,6 +772,14 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Use my M-Pesa figure: KSh " + scannedFood + " (about KSh " + (scannedFood / 30) + "/day)") }
+                    }
+                    if (foodAvg90 > 0 && monthlyFoodInput.toDoubleOrNull()?.toInt() != foodAvg90.toInt()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = { monthlyFoodInput = foodAvg90.toInt().toString() },
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Use your recorded 90-day Food average: KSh ${foodAvg90.toInt()}/month") }
                     }
                     if (foodBudget == null) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1265,6 +1288,7 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         onClick = { autoPlanWeek() },
+                        enabled = monthlyFood > 0,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
@@ -1376,11 +1400,12 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = { generateMenu() },
+                            enabled = monthlyFood > 0,
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) { Text("Generate", color = MaterialTheme.colorScheme.onPrimary) }
-                        TextButton(onClick = { seed = (1..1000).random(); generateMenu() }, enabled = mealItems.isNotEmpty()) { Text("Shuffle") }
+                        TextButton(onClick = { seed = (1..1000).random(); generateMenu() }, enabled = mealItems.isNotEmpty() && monthlyFood > 0) { Text("Shuffle") }
                         TextButton(onClick = { fixOverDays() }, enabled = menu.any { it.overBudget }) { Text("Fix over") }
                         OutlinedButton(onClick = { shareMenu() }, enabled = menu.isNotEmpty(), shape = RoundedCornerShape(16.dp)) { Text("Share") }
                         OutlinedButton(

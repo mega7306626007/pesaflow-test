@@ -8,6 +8,7 @@ import com.pesaflow.app.data.ledger.applyContactMemory
 import com.pesaflow.app.data.ledger.readContactMemories
 import com.pesaflow.app.data.models.PendingTransaction
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
 
 // First-run M-Pesa history scan: last 60 days of SMS for figure confirmation
 // and gentle re-adjustment of onboarding estimates. Read-only — nothing is
@@ -127,14 +128,21 @@ suspend fun scanRecentSms(
         memPrefs.all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
     )
     val resolved = applyContactMemory(parsed, memories)
+    // Wallet receipts and companion Ziidi/telco notices can describe the same
+    // movement with different sender IDs and reference codes. Keep the parsed
+    // messages available for confirmation, but count one event in estimates.
+    val financialEvents = mutableListOf<PendingTransaction>()
+    resolved.sortedBy { it.dateTimestamp }.forEach { row ->
+        if (financialEvents.none { row.hasRelatedSmsNotice(it) }) financialEvents.add(row)
+    }
     // Wallet display: newest balance tail seen (scan order is newest-first).
     newestBalance?.let { saveMpesaBalance(context, it) }
     var income = 0.0
     var expense = 0.0
     val cats = mutableMapOf<String, Double>()
-    resolved.forEach { p ->
+    financialEvents.forEach { p ->
         // Only true spending paces budgets — transfers/savings moves are not expenses.
-        if (p.type == TransactionType.INCOME) income += p.amount
+        if (p.isEarnedIncome()) income += p.amount
         else if (p.type == TransactionType.EXPENSE) expense += p.amount
         if (p.type == TransactionType.EXPENSE) cats[p.category] = (cats[p.category] ?: 0.0) + p.amount
     }

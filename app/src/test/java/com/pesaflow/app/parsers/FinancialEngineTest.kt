@@ -170,6 +170,36 @@ class FinancialEngineTest {
         assertTrue(s.netWorth < Money.of(100000.0))
     }
 
+    @Test
+    fun `fuliza draw remains cash but is excluded from earned income and tracked as debt`() {
+        val now = System.currentTimeMillis()
+        val draw = tx(500.0, TransactionType.INCOME, "Debt", "Fuliza", ts = now)
+            .copy(subcategory = "Borrowed funds")
+        val repayment = tx(200.0, TransactionType.EXPENSE, "Debt", "Fuliza", ts = now + 1)
+            .copy(subcategory = "Fuliza repayment")
+        val snapshot = buildSnapshot(base(txs = listOf(draw, repayment)))
+
+        assertEquals(Money.ZERO, snapshot.monthlyEarnedIncome)
+        assertEquals(Money.of(300.0), snapshot.totalLiabilities)
+        assertEquals(Money.of(300.0), snapshot.liquid)
+        assertEquals(Money.ZERO, snapshot.netWorth)
+    }
+
+    @Test
+    fun `ziidi withdrawal restores wallet cash without inventing earned income`() {
+        val now = System.currentTimeMillis()
+        val deposit = tx(1000.0, TransactionType.SAVING, "Savings", "Ziidi", ts = now)
+            .copy(subcategory = "Ziidi transfer")
+        val withdrawal = tx(300.0, TransactionType.INCOME, "Savings", "Ziidi", ts = now + 1)
+            .copy(subcategory = "Ziidi transfer")
+        val snapshot = buildSnapshot(base(txs = listOf(deposit, withdrawal)))
+
+        assertEquals(Money.ZERO, snapshot.monthlyEarnedIncome)
+        assertEquals(Money.of(700.0), snapshot.accounts[com.pesaflow.app.data.finance.Account.ZIIDI])
+        assertEquals(Money.of(-700.0), snapshot.accounts[com.pesaflow.app.data.finance.Account.M_PESA])
+        assertEquals(Money.ZERO, snapshot.netWorth)
+    }
+
     // §25 — same income, different lives, different answers.
     @Test
     fun `same income different lives give different safe to spend`() {

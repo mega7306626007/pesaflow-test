@@ -36,6 +36,17 @@ class SpendTimingTest {
     }
 
     @Test
+    fun `borrowed funds do not qualify as paydays`() {
+        val rows = listOf(
+            row(10000.0, TransactionType.INCOME, 40).copy(earnedIncome = false),
+            row(9000.0, TransactionType.EXPENSE, 39),
+            row(10000.0, TransactionType.INCOME, 10).copy(earnedIncome = false),
+            row(9500.0, TransactionType.EXPENSE, 9)
+        )
+        assertNull(paydaySplurge(rows))
+    }
+
+    @Test
     fun `instant splurger reads near one hundred percent`() {
         val rows = listOf(
             row(10000.0, TransactionType.INCOME, 40),

@@ -180,6 +180,22 @@ fun periodNameOf(type: BudgetType): String = when (type) {
     else -> "annual"
 }
 
+fun recommendedBudgetPeriod(
+    availableCash: Double,
+    dailyNeeds: Double,
+    daysUntilNextIncome: Int? = null
+): BudgetType? {
+    if (!availableCash.isFinite() || !dailyNeeds.isFinite() || dailyNeeds <= 0.0) return null
+    val incomeDays = daysUntilNextIncome?.coerceAtLeast(1)
+    return when {
+        incomeDays != null && incomeDays <= 7 -> BudgetType.DAILY
+        availableCash < dailyNeeds * 7 -> BudgetType.DAILY
+        incomeDays != null && incomeDays <= 30 -> BudgetType.WEEKLY
+        availableCash < dailyNeeds * 30 -> BudgetType.WEEKLY
+        else -> BudgetType.MONTHLY
+    }
+}
+
 fun monthlyBillReserve(bill: Bill, now: Long): Int {
     if (bill.paidBy != "ME") return 0
     val remaining = bill.amountRemaining.takeIf { it > 0 } ?: bill.amount
@@ -214,7 +230,8 @@ fun smartBudget(
     style: LifestylePreset = LifestylePreset.BALANCED,
     // Declared envelopes (matatu preset, onboarding, manual): a stated number
     // is a promise — the plan never suggests below it on monthly periods.
-    declaredByCategory: Map<String, Int> = emptyMap()
+    declaredByCategory: Map<String, Int> = emptyMap(),
+    periodBudgetCap: Double? = null
 ): SmartBudgetResult {
     val scale = periodScale(period)
     val periodName = periodNameOf(period)
@@ -261,7 +278,9 @@ fun smartBudget(
         t.category to if (t.tier == 1 || t.mobilityEssential) round(t.floorMonthly * scale / step) * step else 0.0
     }
     var floorSum = floorScaled.values.sum()
-    var remaining = (monthlyBase * scale - floorSum).coerceAtLeast(0.0)
+    val planBase = periodBudgetCap?.let { minOf(monthlyBase * scale, it.coerceAtLeast(0.0)) }
+        ?: monthlyBase * scale
+    var remaining = (planBase - floorSum).coerceAtLeast(0.0)
 
     // Phase 2: share remaining by weight, lifestyle last (zeroed in tight mode).
     // Then blend with the user's own 90-day average per category (±30% clamp):
@@ -298,7 +317,7 @@ fun smartBudget(
         if (neat <= 0 && billFloor <= 0 && declaredFloor <= 0) {
             dropped.add(t.category)
         } else {
-            val pct = if (monthlyBase > 0) ((neat / (monthlyBase * scale)) * 100).toInt() else 0
+            val pct = if (planBase > 0) ((neat / planBase) * 100).toInt() else 0
             val homeFed = persona == Persona.PARENTS_FAR || persona == Persona.PARENTS_NEAR
             val reason = when {
                 billFloor > 0 && neat <= billFloor -> "Covers your open ${t.category.lowercase()} bill"
@@ -319,6 +338,24 @@ fun smartBudget(
         }
     }
 
+    if (periodBudgetCap != null) {
+        var excess = (suggestions.sumOf { it.amount } - planBase).coerceAtLeast(0.0).toInt()
+        for (i in suggestions.indices.reversed()) {
+            if (excess <= 0) break
+            val current = suggestions[i]
+            val reduction = minOf(current.amount, excess)
+            val revised = current.amount - reduction
+            excess -= reduction
+            suggestions[i] = current.copy(
+                amount = revised,
+                percent = if (planBase > 0) (revised / planBase * 100).toInt() else 0,
+                reason = if (reduction > 0) "Reduced to fit current funds" else current.reason
+            )
+        }
+        val removed = suggestions.filter { it.amount <= 0 }.map { it.category }
+        suggestions.removeAll { it.amount <= 0 }
+        dropped.addAll(removed.filterNot { it in dropped })
+    }
     val total = suggestions.sumOf { it.amount }
     val summary = if (tightMode) {
         "Tight mode: KSh ${monthlyBase.toInt()}/mo funds survival first for ${persona.label}. " +

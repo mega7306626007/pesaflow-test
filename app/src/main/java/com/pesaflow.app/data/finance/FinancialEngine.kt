@@ -4,6 +4,8 @@ import com.pesaflow.app.data.models.BudgetType
 import com.pesaflow.app.data.models.PaymentMethod
 import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
+import com.pesaflow.app.data.models.isEarnedIncome
+import com.pesaflow.app.data.models.isFulizaBorrowing
 import java.util.Calendar
 
 // Canonical Financial State Engine (§2–§3): RAW INPUTS → snapshot. Pure
@@ -13,6 +15,17 @@ import java.util.Calendar
 // partial bill payments reduce the bill's amountRemaining.
 private const val DAY_MS = 24L * 60 * 60 * 1000
 private val ESSENTIAL_CATEGORIES = setOf("Rent", "School", "Health", "Food", "Transport")
+
+fun fulizaOutstanding(txs: List<Transaction>): Double =
+    txs.filter { !it.isSample }.sumOf { tx ->
+        when {
+            tx.isFulizaBorrowing() -> tx.amount
+            tx.type == TransactionType.EXPENSE &&
+                (tx.subcategory.equals("Fuliza repayment", ignoreCase = true) ||
+                    tx.merchant.contains("fuliza", ignoreCase = true)) -> -tx.amount
+            else -> 0.0
+        }
+    }.coerceAtLeast(0.0)
 
 fun accountKindFor(method: PaymentMethod, merchant: String, type: TransactionType): Account {
     if (merchant.contains("ziidi", ignoreCase = true) &&
@@ -92,15 +105,29 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
         val acct = accountOf(tx)
         when (tx.type) {
             TransactionType.INCOME -> {
-                accounts[acct] = accounts.getValue(acct) + m
+                val ziidiMove = tx.subcategory.equals("Ziidi transfer", ignoreCase = true)
+                if (ziidiMove) {
+                    accounts[Account.M_PESA] = accounts.getValue(Account.M_PESA) + m
+                    accounts[Account.ZIIDI] = accounts.getValue(Account.ZIIDI) - m
+                } else {
+                    accounts[acct] = accounts.getValue(acct) + m
+                }
                 spendableDelta += m
+                if (ziidiMove) savedWealth -= m
             }
             TransactionType.EXPENSE -> {
                 accounts[acct] = accounts.getValue(acct) - m
                 spendableDelta -= m
             }
             TransactionType.SAVING, TransactionType.INVESTMENT -> {
-                accounts[acct] = accounts.getValue(acct) - m
+                val ziidiDeposit = tx.type == TransactionType.SAVING &&
+                    tx.subcategory.equals("Ziidi transfer", ignoreCase = true)
+                if (ziidiDeposit) {
+                    accounts[Account.M_PESA] = accounts.getValue(Account.M_PESA) - m
+                    accounts[Account.ZIIDI] = accounts.getValue(Account.ZIIDI) + m
+                } else {
+                    accounts[acct] = accounts.getValue(acct) - m
+                }
                 spendableDelta -= m
                 savedWealth += m
             }
@@ -133,7 +160,8 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
     val liquid = spendableDelta
     val totalAssets = liquid + savedWealth
     val debtsOwed = input.debts.filter { it.status != "PAID" && it.direction == "I_OWE" }
-    val totalLiabilities = Money.of(debtsOwed.sumOf { it.amount })
+    val trackedFuliza = fulizaOutstanding(real)
+    val totalLiabilities = Money.of(debtsOwed.sumOf { it.amount } + trackedFuliza)
     val netWorth = totalAssets - totalLiabilities
 
     // Monthly EARNED income: real income events in-period. Samples excluded,
@@ -141,7 +169,7 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
     // in liquid, it is simply never called salary.
     val monthlyEarnedIncome = Money.of(
         flows.filter {
-            it.type == TransactionType.INCOME && !it.isOpening && it.dateTimestamp >= monthStart
+            it.isEarnedIncome() && it.dateTimestamp >= monthStart
         }.sumOf { it.amount }
     )
 
@@ -168,7 +196,7 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
         )
     }.sortedByDescending { it.urgency }
     val upcomingBillsTotal = Money.of(openBills.sumOf { b -> b.amountRemaining.takeIf { it > 0 } ?: b.amount })
-    val upcomingDebtTotal = Money.of(debtsOwed.sumOf { it.amount })
+    val upcomingDebtTotal = Money.of(debtsOwed.sumOf { it.amount } + trackedFuliza)
 
     // HELB semester treatment (§15): split fees vs upkeep only when the user
     // gave both figures. Never invent a split.
@@ -214,7 +242,7 @@ fun buildSnapshot(input: SnapshotInput): FinancialSnapshot {
             val y = c.get(Calendar.YEAR)
             val m = c.get(Calendar.MONTH)
             real.any {
-                it.type == TransactionType.INCOME && matchesSource(it, s.label, s.kind) &&
+                it.isEarnedIncome() && matchesSource(it, s.label, s.kind) &&
                     Calendar.getInstance().apply { timeInMillis = it.dateTimestamp }.let {
                         it.get(Calendar.YEAR) == y && it.get(Calendar.MONTH) == m
                     }
@@ -386,7 +414,7 @@ private fun monthlyLandedFor(
     monthStart: Long
 ): Double {
     return txs.filter {
-        it.type == TransactionType.INCOME && !it.isOpening && it.dateTimestamp >= monthStart && matchesSource(it, label, kind)
+        it.isEarnedIncome() && it.dateTimestamp >= monthStart && matchesSource(it, label, kind)
     }.sumOf { it.amount }
 }
 

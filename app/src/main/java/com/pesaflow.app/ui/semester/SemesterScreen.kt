@@ -485,7 +485,7 @@ private fun buildSemesterPdf(
     }
     line("PesaPlanner — Semester Statement", true)
     line(profile?.universityName?.takeIf { it.isNotBlank() } ?: "University")
-    val income = transactions.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }.sumOf { it.amount }
+    val income = transactions.filter { it.isEarnedIncome() && !it.isSample }.sumOf { it.amount }
     val spent = transactions.filter { it.type == TransactionType.EXPENSE && !it.isSample }.sumOf { it.amount }
     line("Income: KSh ${income.toInt()}")
     line("Expenses: KSh ${spent.toInt()}")

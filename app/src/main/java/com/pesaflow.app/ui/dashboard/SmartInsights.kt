@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.pesaflow.app.data.models.isEarnedIncome
 import com.pesaflow.app.data.schedule.WeekPlan
 import com.pesaflow.app.ui.budgets.Persona
 import com.pesaflow.app.ui.budgets.parsePersona
@@ -59,7 +60,7 @@ fun SmartInsightsCard(
                 set(java.util.Calendar.MILLISECOND, 0)
             }.timeInMillis
             transactions.filter {
-                it.type == com.pesaflow.app.data.models.TransactionType.INCOME && !it.isSample &&
+                it.isEarnedIncome() && !it.isSample &&
                     it.dateTimestamp >= monthStartH && labels.any { l -> it.merchant.contains(l, ignoreCase = true) }
             }.sumOf { it.amount }
         }

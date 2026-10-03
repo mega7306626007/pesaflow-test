@@ -1,5 +1,6 @@
 package com.pesaflow.app.parsers
 
+import com.pesaflow.app.ui.dashboard.buddySafeDaily
 import com.pesaflow.app.ui.dashboard.safeDayFigure
 import org.junit.Assert.*
 import org.junit.Test
@@ -61,5 +62,24 @@ class SafeSpendMathTest {
         val fig = safeDayFigure(1000.0, 0.0, 0, 0, 1.0, 0, 28, 28)
         assertEquals(1, fig.daysLeft)
         assertEquals(1000, fig.dailyTarget)
+    }
+
+    @Test
+    fun `actual flexible cash caps budget pace`() {
+        val fig = safeDayFigure(
+            monthlyLimit = 30_000.0, spentMonth = 0.0,
+            planDaily = 0, billDaily = 0, weekdayFactor = 1.0,
+            todaySpend = 0, dayOfMonth = 1, daysInMonth = 30,
+            flexibleCash = 900.0
+        )
+        assertEquals(30, fig.dailyTarget)
+    }
+
+    @Test
+    fun `buddy safe daily is capped by both budget and free cash`() {
+        assertEquals(30, buddySafeDaily(30_000.0, 900.0, 30))
+        assertEquals(100, buddySafeDaily(3_000.0, 9_000.0, 30))
+        assertEquals(0, buddySafeDaily(-100.0, 9_000.0, 30))
+        assertEquals(0, buddySafeDaily(3_000.0, 9_000.0, 0))
     }
 }

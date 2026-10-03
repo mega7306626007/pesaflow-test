@@ -268,7 +268,7 @@ fun processUserInput(
             c.get(java.util.Calendar.MONTH) == nowCal.get(java.util.Calendar.MONTH)
     }
     val monthTx = txs.filter { inMonth(it.dateTimestamp) && !it.isSample }
-    val monthIncome = monthTx.filter { it.type == TransactionType.INCOME && !it.isOpening }.sumOf { it.amount }
+    val monthIncome = monthTx.filter { it.isEarnedIncome() }.sumOf { it.amount }
     val monthExpense = monthTx.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
     val todaySpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= dayStart }.sumOf { it.amount }
     val weekSpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp in week && com.pesaflow.app.data.time.inPastOrNow(it.dateTimestamp, nowMs) }.sumOf { it.amount }
@@ -291,7 +291,8 @@ fun processUserInput(
     // Money already spoken for: unpaid bills + debts I owe. Runway/afford/safe
     // answer against what's actually free, never the raw balance.
     val iOweTotal = openDebts.filter { it.direction == "I_OWE" }.sumOf { it.amount }
-    val committed = openBillTotal + iOweTotal
+    val fulizaOutstanding = com.pesaflow.app.data.finance.fulizaOutstanding(txs)
+    val committed = openBillTotal + iOweTotal + fulizaOutstanding
     val freeBalance = balance - committed
     val mealCount = viewModel.mealItems.value.size
     val foodBudgetAmt = viewModel.budgets.value.firstOrNull { it.category == "Food" }?.limitAmount
@@ -378,8 +379,9 @@ fun processUserInput(
         q.contains("safe") || q.contains("daily") || q.contains("per day") || q.contains("kila siku") || q.contains("can i spend") ->
             if (txs.isEmpty() && budget == null) "Add some income/expenses or set a budget first, then I'll compute your safe daily spend."
             else {
-                val pool = if (budget != null) (budget.limitAmount - monthExpense).coerceAtLeast(0.0) else freeBalance.coerceAtLeast(0.0)
-                "You can roughly spend KSh ${(pool / daysLeft).toInt()} per day for the remaining $daysLeft days." +
+                val budgetRemaining = budget?.let { it.limitAmount - monthExpense } ?: freeBalance
+                val daily = buddySafeDaily(budgetRemaining, freeBalance, daysLeft)
+                "You can roughly spend KSh $daily per day for the remaining $daysLeft days, capped by both budget remaining and cash after bills/debts." +
                     (if (budget == null && committed > 0) " (after KSh ${committed.toInt()} bills + deni.)" else "") +
                     " Hii ni estimate, not a guarantee."
             }
@@ -630,7 +632,7 @@ fun processUserInput(
 
         userInput.lowercase().contains("salary") || userInput.lowercase().contains("income") ->
             run {
-                val topIn = monthTx.filter { it.type == TransactionType.INCOME && !it.isOpening }.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }.maxByOrNull { it.value }
+                val topIn = monthTx.filter { it.isEarnedIncome() }.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }.maxByOrNull { it.value }
                 val appSources = viewModel.incomeSources.value
                 val expected = appSources.sumOf { com.pesaflow.app.data.income.IncomeSourceStore.budgetedMonthly(it) }
                 val declared = appSources.takeIf { it.isNotEmpty() }

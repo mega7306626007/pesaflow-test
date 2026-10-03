@@ -3,6 +3,7 @@ package com.pesaflow.app.data.repositories
 import com.pesaflow.app.data.database.AppDatabase
 import com.pesaflow.app.data.income.IncomeSource
 import com.pesaflow.app.data.models.*
+import com.pesaflow.app.data.parsers.hasRelatedSmsNotice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -259,7 +260,9 @@ class FinanceRepository(private val database: AppDatabase) {
         if (code.isNotEmpty()) {
             if (database.pendingTransactionDao().findBySourceCode(code) != null) return false
             if (database.transactionDao().findBySourceCode(code) != null) return false
-        } else {
+        }
+        if (hasRelatedSmsDuplicate(pending)) return false
+        if (code.isEmpty()) {
             // Codeless rows (bundles, bare notices) carry no M-Pesa code — match
             // by amount + merchant within 24h instead. Deliberately NOT applied
             // to coded rows, where two identical lunches in one day are legit.
@@ -267,6 +270,16 @@ class FinanceRepository(private val database: AppDatabase) {
         }
         database.pendingTransactionDao().insertPendingTransaction(pending)
         return true
+    }
+
+    private suspend fun hasRelatedSmsDuplicate(pending: PendingTransaction): Boolean {
+        val window = 10L * 60 * 1000
+        val start = pending.dateTimestamp - window
+        val end = pending.dateTimestamp + window
+        return database.pendingTransactionDao().findInWindow(pending.amount, start, end)
+            .any { pending.hasRelatedSmsNotice(it) } ||
+            database.transactionDao().findInWindow(pending.amount, start, end)
+                .any { pending.hasRelatedSmsNotice(it) }
     }
 
 
@@ -327,6 +340,7 @@ class FinanceRepository(private val database: AppDatabase) {
             amount = pending.amount,
             type = finalType,
             category = customizedCategory,
+            subcategory = pending.subcategory,
             dateTimestamp = pending.dateTimestamp,
             merchant = pending.merchant,
             description = pending.rawText,

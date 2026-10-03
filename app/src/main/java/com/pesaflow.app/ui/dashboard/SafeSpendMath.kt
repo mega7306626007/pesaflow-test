@@ -26,14 +26,22 @@ fun safeDayFigure(
     weekdayFactor: Double,
     todaySpend: Int,
     dayOfMonth: Int,
-    daysInMonth: Int
+    daysInMonth: Int,
+    flexibleCash: Double = Double.POSITIVE_INFINITY
 ): SafeDayFigure {
     val daysLeft = (daysInMonth - dayOfMonth + 1).coerceAtLeast(1)
     val reserve = (planDaily + billDaily) * daysLeft
     val remaining = monthlyLimit - spentMonth - reserve
-    val dailyTarget = (remaining / daysLeft).coerceAtLeast(0.0).toInt()
+    val budgetPace = (remaining / daysLeft).coerceAtLeast(0.0)
+    val cashPace = (flexibleCash.coerceAtLeast(0.0) / daysLeft)
+    val dailyTarget = minOf(budgetPace, cashPace).toInt()
     val allowance = (dailyTarget * weekdayFactor).toInt()
     return SafeDayFigure(daysLeft, spentMonth, remaining, dailyTarget, allowance, allowance - todaySpend)
+}
+
+fun buddySafeDaily(budgetRemaining: Double, freeBalance: Double, daysLeft: Int): Int {
+    if (daysLeft <= 0) return 0
+    return (minOf(budgetRemaining, freeBalance).coerceAtLeast(0.0) / daysLeft).toInt()
 }
 
 
