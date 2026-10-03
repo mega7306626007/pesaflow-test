@@ -472,8 +472,8 @@ fun UniversityFinancialPlanner(
                     else "${runway.daysRemaining} days"
             )
             UniversityInfoRow(
-                label = "Weekly allowance",
-                value = MoneyFormatter.compact(Money.of(runway.weeklyAllowance)),
+                label = if (runway.weeklyAllowance < 0) "Weekly shortfall" else "Weekly allowance",
+                value = MoneyFormatter.compact(Money.of(kotlin.math.abs(runway.weeklyAllowance))),
                 color = if (runway.weeklyAllowance < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
             )
             UniversityInfoRow(

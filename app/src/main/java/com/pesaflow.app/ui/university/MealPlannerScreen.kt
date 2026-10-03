@@ -159,7 +159,7 @@ private data class Staple(
 )
 
 
-// One-tap starter pack: 10 Kenyan staples with realistic student prices.
+// Editable starter estimates; current shop prices are not verified centrally.
 private val STAPLES = listOf(
     Staple("Sukuma wiki", "Lunch", 30.0, "Mboga", "Cook"),
     Staple("Ugali", "Lunch", 30.0, "Starch", "Cook"),
@@ -846,6 +846,11 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
 
                     if (mealItems.isEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Starter meal prices are estimates. Adjust them to what your local shop or kibanda charges.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         OutlinedButton(
                             onClick = {
                                 STAPLES.forEach {
@@ -856,10 +861,15 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) { Text(if ("staples" in acked) "Added 10 ✓" else "Add 10 staples pack 🧺 — start in one tap") }
-                        // Campus pack: this school's actual spots and plates.
+                        // Local starter suggestions, not live-verified listings.
                         // Skips plates already in My Foods; prices stay editable.
                         if (campusSpots.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "Nearby names and prices are starter estimates, not live-verified. Check locally before budgeting.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             val missing = campusSpots.filter { s ->
                                 mealItems.none { it.name.equals("${s.item} (${s.spot})", ignoreCase = true) }
                             }
@@ -877,7 +887,7 @@ fun MealPlannerScreen(viewModel: FinanceViewModel) {
                                 Text(
                                     if ("campus" in acked) "Added ✓"
                                     else if (missing.isEmpty()) "${campusSpots.first().university} pack in ✓ — prices editable below"
-                                    else "Add ${campusSpots.first().university} campus pack 🍲 — ${missing.size} plates near you"
+                                    else "Add ${campusSpots.first().university} local estimates 🍲 — ${missing.size} meal ideas"
                                 )
                             }
                         }

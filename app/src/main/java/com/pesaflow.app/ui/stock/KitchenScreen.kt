@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -15,6 +16,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.pesaflow.app.data.models.PaymentMethod
 import com.pesaflow.app.data.models.TransactionType
@@ -210,7 +212,7 @@ fun KitchenScreen(viewModel: FinanceViewModel) {
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(value = dailyUse, onValueChange = { dailyUse = it }, label = { Text("Used per cooking day ($unit)") }, modifier = Modifier.fillMaxWidth())
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price per pack (KSh)") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price per pack from your shop (KSh)") }, modifier = Modifier.fillMaxWidth())
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(value = expiryDays, onValueChange = { expiryDays = it }, label = { Text("Good for (days, empty = not perishable)") }, modifier = Modifier.fillMaxWidth())
                     Spacer(modifier = Modifier.height(8.dp))
@@ -291,6 +293,10 @@ fun KitchenScreen(viewModel: FinanceViewModel) {
             if (ranked.isNotEmpty()) {
                 Text("Cupboard (${ranked.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 ranked.forEach { item ->
+                    var topUpQty by remember(item.id) { mutableStateOf("1") }
+                    var purchaseMethod by remember(item.id) { mutableStateOf(PaymentMethod.CASH) }
+                    var purchaseError by remember(item.id) { mutableStateOf<String?>(null) }
+                    var purchasing by remember(item.id) { mutableStateOf(false) }
                     val days = stockDaysLeft(item)
                     val cost = stockRefillCost(item)
                     val refillOn = dateFmt.format(java.util.Date(stockReplenishDate(item)))
@@ -342,6 +348,42 @@ fun KitchenScreen(viewModel: FinanceViewModel) {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedTextField(
+                                value = topUpQty,
+                                onValueChange = {
+                                    topUpQty = it.filter { ch -> ch.isDigit() || ch == '.' }.take(8)
+                                    purchaseError = null
+                                },
+                                label = { Text("Top up quantity (${item.unit})") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            val purchaseQuantity = topUpQty.toDoubleOrNull()
+                            val purchaseCost = purchaseQuantity?.let { com.pesaflow.app.data.models.stockTopUpCost(item, it) }
+                            Text(
+                                purchaseCost?.let { "Estimated purchase: KSh ${it.toInt()} · deducted from Food spending" }
+                                    ?: "Set a valid pack size and shop price above to calculate and log a top-up.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(
+                                    PaymentMethod.CASH to "Cash",
+                                    PaymentMethod.MPESA to "M-Pesa",
+                                    PaymentMethod.BANK_TRANSFER to "Bank"
+                                ).forEach { (method, label) ->
+                                    FilterChip(
+                                        selected = purchaseMethod == method,
+                                        onClick = { purchaseMethod = method },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
+                            purchaseError?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            }
                             Spacer(modifier = Modifier.height(4.dp))
                             // Fractional use: a quarter cabbage for supper, half unga for lunch —
                             // logStockUse already takes fractions, now the UI offers them.
@@ -391,17 +433,26 @@ fun KitchenScreen(viewModel: FinanceViewModel) {
                                     onClick = { viewModel.restockKitchen(item); ack("${item.id}:restock") },
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
-                                    Text(if ("${item.id}:restock" in acked) "Restocked ✓" else "Restocked")
+                                    Text(if ("${item.id}:restock" in acked) "Shelf reset ✓" else "Set shelf to one pack (no purchase)")
                                 }
-                                if (cost > 0) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            viewModel.addManualTransaction(cost, TransactionType.EXPENSE, "Food", "Restock ${item.name}", PaymentMethod.CASH)
-                                            viewModel.restockKitchen(item)
-                                            ack("${item.id}:log")
-                                        },
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) { Text(if ("${item.id}:log" in acked) "Logged ✓" else "Log KSh ${cost.toInt()} refill") }
+                                Button(
+                                    onClick = {
+                                        purchaseQuantity?.let { quantity ->
+                                            purchasing = true
+                                            viewModel.purchaseKitchenStock(item, quantity, purchaseMethod) { error ->
+                                                purchasing = false
+                                                purchaseError = error
+                                                if (error == null) {
+                                                    topUpQty = "1"
+                                                    ack("${item.id}:topup")
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = purchaseCost != null && !purchasing,
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(if ("${item.id}:topup" in acked) "Added + logged ✓" else "Buy + add stock")
                                 }
                             }
                         }

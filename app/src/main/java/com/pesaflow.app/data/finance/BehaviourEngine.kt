@@ -54,7 +54,7 @@ fun observeSignals(
             week.map { dow(it.dateTimestamp) }.toSet().size
         }.average()
     }
-    val months = rows.filter { it.type == TransactionType.INCOME }
+    val months = rows.filter { it.type == TransactionType.INCOME && !it.isOpening }
         .map {
             val c = Calendar.getInstance().apply { timeInMillis = it.dateTimestamp }
             c.get(Calendar.YEAR) * 12 + c.get(Calendar.MONTH)

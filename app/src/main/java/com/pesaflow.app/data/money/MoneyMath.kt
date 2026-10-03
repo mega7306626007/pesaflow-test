@@ -74,21 +74,23 @@ fun isCurrentMonth(ts: Long, nowMs: Long = System.currentTimeMillis()): Boolean 
         c.get(Calendar.MONTH) == ref.get(Calendar.MONTH)
 }
 
-// Month-scoped totals for rates and verdicts: demo/sample rows never move
-// statistics (they still count in the balance — cash is cash).
+// Month-scoped totals for rates and verdicts: demo/sample rows and opening
+// equity never count as earnings (they still count in held cash).
 fun monthScopedTotal(
     txs: List<Transaction>,
     type: TransactionType,
     nowMs: Long = System.currentTimeMillis(),
     excludeSamples: Boolean = true
 ): Double = txs.filter {
-    it.type == type && (!excludeSamples || !it.isSample) && isCurrentMonth(it.dateTimestamp, nowMs)
+    it.type == type &&
+        (!excludeSamples || !it.isSample) &&
+        (type != TransactionType.INCOME || !it.isOpening) &&
+        isCurrentMonth(it.dateTimestamp, nowMs)
 }.sumOf { it.amount }
 
-// Opening-equity basis: ledger opening rows (pocket + upkeep seeded at
-// onboarding) win when present; the profile funding covers the manual path
-// (set under University with no seeded rows). Never both — that counted
-// pocket money twice and vault/ledger disagreed by exactly that sum.
+// Opening-equity basis: ledger opening rows (cash, M-Pesa, bank) win when
+// present; profile funding covers the manual path (set under University with
+// no seeded rows). Never both — that counted pocket money twice.
 fun openingBasis(openingRows: Double, profileFunding: Double): Double =
     openingRows + (if (openingRows <= 0) profileFunding else 0.0)
 

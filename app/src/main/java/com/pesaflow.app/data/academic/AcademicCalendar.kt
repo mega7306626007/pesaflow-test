@@ -472,7 +472,7 @@ fun buildSpendProfile(rows: List<Transaction>, window: ScanWindow): SpendProfile
     var paydayAmount: Double? = null
     var paydayDay: Int? = null
     var paydayWho: String? = null
-    inWin.filter { it.type == TransactionType.INCOME }
+    inWin.filter { it.type == TransactionType.INCOME && !it.isOpening && !it.isSample }
         .groupBy { it.merchant.trim().lowercase() }
         .mapNotNull { (_, list) ->
             if (list.size < 2) return@mapNotNull null

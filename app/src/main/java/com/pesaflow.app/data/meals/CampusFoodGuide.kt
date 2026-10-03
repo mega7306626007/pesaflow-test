@@ -1,10 +1,8 @@
 ﻿package com.pesaflow.app.data.meals
 
-// Campus guide: where to eat near your school (what plate, what price) and
-// what student housing runs nearby. verified = confirmed by a real report
-// (user examples, 2026 housing/fare press); unmarked bands are typical
-// student ranges - every inserted row stays editable, so the crowd corrects
-// the guide. Pure data, zero Android deps.
+// Campus starter suggestions. Most places and prices are community estimates,
+// not live-verified listings; the planner asks students to confirm/edit them.
+// Pure data, zero Android dependencies.
 data class CampusSpot(
     val university: String,
     val spot: String,

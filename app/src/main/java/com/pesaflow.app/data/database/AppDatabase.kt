@@ -15,7 +15,7 @@ import com.pesaflow.app.data.places.Place
 
 @Database(
     entities = [Transaction::class, PendingTransaction::class, Budget::class, SavingsGoal::class, UniversityProfile::class, Bill::class, Debt::class, MealItem::class, ChamaGroup::class, Belonging::class, KitchenStock::class, UserRhythm::class, MoneyAccount::class, IncomeSource::class, FinancialProfile::class, ContextFact::class, Place::class],
-    version = 22,
+    version = 23,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -79,6 +79,17 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE bills ADD COLUMN paidBy TEXT NOT NULL DEFAULT 'ME'")
             }
         }
+        // Older onboarding incorrectly seeded expected sponsor upkeep as
+        // opening cash. Remove only those precisely identified phantom rows.
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "DELETE FROM transactions WHERE type = 'INCOME' AND isOpening = 1 " +
+                        "AND merchant = 'Monthly upkeep' " +
+                        "AND description = 'Home/sponsor monthly upkeep, in hand'"
+                )
+            }
+        }
         // Phase 8 places catalogue: user-entered local knowledge first.
         val MIGRATION_18_19 = object : Migration(18, 19) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -130,7 +141,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "pesaflow_secure_db"
-                ).addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22).fallbackToDestructiveMigration().build()
+                ).addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
             }

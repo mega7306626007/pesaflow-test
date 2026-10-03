@@ -70,7 +70,7 @@ class RhythmEngine(
         fun domOf(ts: Long): Int =
             Calendar.getInstance().apply { timeInMillis = ts }.get(Calendar.DAY_OF_MONTH)
 
-        val incomeTxs = recent.filter { it.type == TransactionType.INCOME }
+        val incomeTxs = recent.filter { it.type == TransactionType.INCOME && !it.isOpening && !it.isSample }
         val expenseTxs = recent.filter { it.type == TransactionType.EXPENSE }
         val transportTxs = expenseTxs.filter { it.category.equals("Transport", ignoreCase = true) }
         val transportByDay = transportTxs.groupBy { it.dateTimestamp / (24L * 60 * 60 * 1000) }

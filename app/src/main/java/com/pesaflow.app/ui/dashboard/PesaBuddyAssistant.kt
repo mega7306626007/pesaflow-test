@@ -268,7 +268,7 @@ fun processUserInput(
             c.get(java.util.Calendar.MONTH) == nowCal.get(java.util.Calendar.MONTH)
     }
     val monthTx = txs.filter { inMonth(it.dateTimestamp) && !it.isSample }
-    val monthIncome = monthTx.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
+    val monthIncome = monthTx.filter { it.type == TransactionType.INCOME && !it.isOpening }.sumOf { it.amount }
     val monthExpense = monthTx.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
     val todaySpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= dayStart }.sumOf { it.amount }
     val weekSpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp in week && com.pesaflow.app.data.time.inPastOrNow(it.dateTimestamp, nowMs) }.sumOf { it.amount }
@@ -630,7 +630,7 @@ fun processUserInput(
 
         userInput.lowercase().contains("salary") || userInput.lowercase().contains("income") ->
             run {
-                val topIn = monthTx.filter { it.type == TransactionType.INCOME }.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }.maxByOrNull { it.value }
+                val topIn = monthTx.filter { it.type == TransactionType.INCOME && !it.isOpening }.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }.maxByOrNull { it.value }
                 val appSources = viewModel.incomeSources.value
                 val expected = appSources.sumOf { com.pesaflow.app.data.income.IncomeSourceStore.budgetedMonthly(it) }
                 val declared = appSources.takeIf { it.isNotEmpty() }

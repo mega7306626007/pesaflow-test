@@ -71,6 +71,23 @@ class DeductionsTest {
     }
 
     @Test
+    fun `configured class window accepts afternoon commute and rejects unrelated rides`() {
+        val commute = listOf(1, 2, 3, 4, 7, 8, 9, 10)
+            .map { row(100.0, "Transport", ms(2026, 10, it, 13, 30), "Stage 46") }
+        val unrelated = listOf(11, 12, 13, 14)
+            .map { row(100.0, "Transport", ms(2026, 10, it, 8, 30), "Stage 46") }
+        val result = deduceFare(
+            commute + unrelated,
+            isClassDay = { true },
+            isClassTime = { ts ->
+                Calendar.getInstance().apply { timeInMillis = ts }.get(Calendar.HOUR_OF_DAY) in 13..19
+            }
+        )
+        assertNotNull(result)
+        assertTrue(result!!.evidence.contains("8 of 8"))
+    }
+
+    @Test
     fun `two different lives stay silent`() {
         // 50s and 200s equally: no dominant run, spread kills confidence.
         val rows = (1..5).map { row(50.0, "Transport", ms(2026, 9, it, 8, 0)) } +

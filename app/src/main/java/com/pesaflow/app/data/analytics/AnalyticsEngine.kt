@@ -86,7 +86,7 @@ fun buildAnalyticsReport(
     val window = rollingDays(now, periodDays.coerceAtLeast(1))
     val inWindow = allTxs.filter { it.dateTimestamp in window && it.dateTimestamp <= now }
     val expenses = inWindow.filter { it.type == TransactionType.EXPENSE && !it.isSample }
-    val incomes = inWindow.filter { it.type == TransactionType.INCOME && !it.isSample }
+    val incomes = inWindow.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }
     val totalSpent = expenses.sumOf { it.amount }
     val totalIncome = incomes.sumOf { it.amount }
 

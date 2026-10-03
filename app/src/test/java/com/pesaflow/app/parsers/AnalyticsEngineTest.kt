@@ -8,8 +8,8 @@ import java.util.Calendar
 class AnalyticsEngineTest {
 
     private val now = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 1, 12, 0) }.timeInMillis
-    private fun tx(amount: Double, category: String, ts: Long, type: com.pesaflow.app.data.models.TransactionType = com.pesaflow.app.data.models.TransactionType.EXPENSE): com.pesaflow.app.data.models.Transaction {
-        return com.pesaflow.app.data.models.Transaction(amount = amount, type = type, category = category, dateTimestamp = ts, merchant = "Test")
+    private fun tx(amount: Double, category: String, ts: Long, type: com.pesaflow.app.data.models.TransactionType = com.pesaflow.app.data.models.TransactionType.EXPENSE, opening: Boolean = false): com.pesaflow.app.data.models.Transaction {
+        return com.pesaflow.app.data.models.Transaction(amount = amount, type = type, category = category, dateTimestamp = ts, merchant = "Test", isOpening = opening)
     }
     private fun day(offset: Int): Long = now - offset * 24L * 60 * 60 * 1000
 
@@ -65,6 +65,17 @@ class AnalyticsEngineTest {
         )
         val r = buildAnalyticsReport(txs, 7, now)
         assertEquals(40, r.savingsRate)
+    }
+
+    @Test
+    fun `opening balance is held cash not reported income`() {
+        val txs = listOf(
+            tx(5000.0, "Income", day(0), com.pesaflow.app.data.models.TransactionType.INCOME, opening = true),
+            tx(1200.0, "Income", day(0), com.pesaflow.app.data.models.TransactionType.INCOME)
+        )
+        val report = buildAnalyticsReport(txs, 7, now)
+        assertEquals(1200.0, report.totalIncome, 0.001)
+        assertEquals(1200.0, report.netFlow, 0.001)
     }
 
     @Test

@@ -72,12 +72,12 @@ fun IncomeScreen(viewModel: FinanceViewModel) {
     val todayDay = remember { java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH) }
     val real = remember(transactions) { transactions.filter { !it.isSample } }
     val mtdIn = remember(real, monthStart) {
-        real.filter { it.type == TransactionType.INCOME && it.dateTimestamp >= monthStart }.sumOf { it.amount }
+        real.filter { it.type == TransactionType.INCOME && !it.isOpening && it.dateTimestamp >= monthStart }.sumOf { it.amount }
     }
     val expected = remember(sources) { sources.sumOf { IncomeSourceStore.budgetedMonthly(it) } }
     val pace = if (expected > 0) (mtdIn / expected).toFloat().coerceIn(0f, 1f) else 0f
     val recentIn = remember(real) {
-        real.filter { it.type == TransactionType.INCOME }.sortedByDescending { it.dateTimestamp }.take(5)
+        real.filter { it.type == TransactionType.INCOME && !it.isOpening }.sortedByDescending { it.dateTimestamp }.take(5)
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -165,7 +165,7 @@ fun IncomeScreen(viewModel: FinanceViewModel) {
                             sources.filter { s ->
                                 s.label.isNotBlank() && s.dayOfMonth in 1..todayDay &&
                                     real.none {
-                                        it.type == TransactionType.INCOME && it.dateTimestamp >= monthStart &&
+                                        it.type == TransactionType.INCOME && !it.isOpening && it.dateTimestamp >= monthStart &&
                                             it.merchant.contains(s.label, ignoreCase = true)
                                     }
                             }
@@ -210,7 +210,7 @@ fun IncomeScreen(viewModel: FinanceViewModel) {
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         val gotMtd = if (s.label.isBlank()) -1.0 else real.filter {
-                                            it.type == TransactionType.INCOME && it.dateTimestamp >= monthStart &&
+                                            it.type == TransactionType.INCOME && !it.isOpening && it.dateTimestamp >= monthStart &&
                                                 it.merchant.contains(s.label, ignoreCase = true)
                                         }.sumOf { it.amount }
                                         if (gotMtd >= 0) {

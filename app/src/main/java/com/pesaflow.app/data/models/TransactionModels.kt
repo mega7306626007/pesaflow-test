@@ -236,6 +236,20 @@ fun stockRefillCost(s: KitchenStock): Double {
     return s.pricePerPack * fraction
 }
 
+fun stockTopUpCost(s: KitchenStock, quantity: Double): Double? {
+    if (
+        !quantity.isFinite() || quantity <= 0 ||
+        !s.qtyFull.isFinite() || s.qtyFull <= 0 ||
+        !s.pricePerPack.isFinite() || s.pricePerPack <= 0
+    ) return null
+    return s.pricePerPack / s.qtyFull * quantity
+}
+
+fun stockAfterTopUp(s: KitchenStock, quantity: Double, now: Long = System.currentTimeMillis()): KitchenStock? {
+    if (stockTopUpCost(s, quantity) == null || !s.qtyLeft.isFinite() || s.qtyLeft < 0) return null
+    return s.copy(qtyLeft = s.qtyLeft + quantity, updatedAt = now)
+}
+
 
 fun stockReplenishDate(s: KitchenStock, now: Long = System.currentTimeMillis()): Long {
     val days = stockDaysLeft(s).toLong().coerceAtMost(3650)

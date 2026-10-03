@@ -134,6 +134,8 @@ class FinanceRepository(private val database: AppDatabase) {
 
     suspend fun insertKitchenStock(item: KitchenStock) = database.kitchenStockDao().insertStock(item)
 
+    suspend fun getKitchenStock(id: String) = database.kitchenStockDao().getStock(id)
+
 
     suspend fun updateKitchenStock(item: KitchenStock) = database.kitchenStockDao().updateStock(item)
 

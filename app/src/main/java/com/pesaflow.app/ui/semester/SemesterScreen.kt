@@ -42,7 +42,7 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
     val mealItems by viewModel.mealItems.collectAsState()
     val context = LocalContext.current
     var roommates by remember { mutableStateOf(2) }
-    var fare by remember { mutableStateOf("") }
+    var fare by remember { mutableStateOf(context.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE).getString("school_fare_one_way", "").orEmpty()) }
     var commuteDays by remember { mutableStateOf("5") }
     var daysTouched by remember { mutableStateOf(false) }
     // Timetable truth: class days drive the commute count; per-day first/last
@@ -339,6 +339,15 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
                     }
                     val weeklyTransport = com.pesaflow.app.data.finance.journeyWeekly(commuteJourney)
                     val monthlyTransport = com.pesaflow.app.data.finance.journeyMonthly(commuteJourney) ?: 0.0
+                    val fareCenter = fare.toDoubleOrNull()?.takeIf { it > 0 }
+                    val days = commuteDays.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                    val weeklyLow = fareCenter?.let { (it - 50).coerceAtLeast(0.0) * 2 * days }
+                    val weeklyHigh = fareCenter?.let { (it + 50) * 2 * days }
+                    Text(
+                        "Fare matching uses this amount ±KSh 50 on timetable days, within 2 hours of class.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     if ((transportMonthly ?: 0.0) > 0) {
                         Text(
                             "Current Transport budget: KSh ${transportMonthly!!.toInt()}/month",
@@ -349,7 +358,7 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "≈ KSh ${monthlyTransport.toInt()}/month" +
+                            "Budget midpoint: KSh ${monthlyTransport.toInt()}/month" +
                                 (weeklyTransport?.let { " (KSh ${it.toInt()}/wk)" } ?: ""),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold
@@ -357,9 +366,22 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
                         Button(
                             // Upsert, never insert: repeated taps update the one
                             // Transport envelope instead of stacking duplicates.
-                            onClick = { viewModel.upsertBudget("Transport", monthlyTransport, BudgetType.MONTHLY) },
+                            onClick = {
+                                context.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
+                                    .edit().putString("school_fare_one_way", fare).apply()
+                                viewModel.upsertBudget("Transport", monthlyTransport, BudgetType.MONTHLY)
+                            },
                             enabled = monthlyTransport > 0
                         ) { Text("Set Budget") }
+                    }
+                    if (weeklyLow != null && weeklyHigh != null) {
+                        Text(
+                            "At ±KSh 50 per ride: KSh ${weeklyLow.toInt()}–${weeklyHigh.toInt()}/week · " +
+                                "KSh ${(weeklyLow * 4.33).toInt()}–${(weeklyHigh * 4.33).toInt()}/month. " +
+                                "The budget uses your entered fare as its midpoint.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -463,7 +485,7 @@ private fun buildSemesterPdf(
     }
     line("PesaPlanner — Semester Statement", true)
     line(profile?.universityName?.takeIf { it.isNotBlank() } ?: "University")
-    val income = transactions.filter { it.type == TransactionType.INCOME && !it.isSample }.sumOf { it.amount }
+    val income = transactions.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }.sumOf { it.amount }
     val spent = transactions.filter { it.type == TransactionType.EXPENSE && !it.isSample }.sumOf { it.amount }
     line("Income: KSh ${income.toInt()}")
     line("Expenses: KSh ${spent.toInt()}")

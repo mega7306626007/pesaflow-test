@@ -64,13 +64,14 @@ fun deduceFare(
     rows: List<LedgerRow>,
     isClassDay: (Long) -> Boolean = { ts ->
         dayOfWeek(ts) in listOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY)
-    }
+    },
+    isClassTime: ((Long) -> Boolean)? = null
 ): Deduction? {
     val mornings = rows.filter {
         it.type == TransactionType.EXPENSE &&
             it.category.equals("Transport", ignoreCase = true) &&
             it.amount in 10.0..500.0 &&
-            hourOf(it.ts) in 5..12
+            if (isClassTime == null) hourOf(it.ts) in 5..12 else isClassTime(it.ts)
     }
     if (mornings.size < 4) return null
     // Dominant nearest-10 band anchors; ±50 tolerance absorbs the rest.
@@ -87,10 +88,10 @@ fun deduceFare(
     // wobble barely registers; a window-spanning sprawl pays full price.
     val spread = ((group.maxOf { it.amount } - group.minOf { it.amount }) / 100.0).coerceAtMost(1.0)
     val distinctDays = group.map { monthId(it.ts) to dayOfMonth(it.ts) }.toSet().size
-    val classMornings = group.count { isClassDay(it.ts) }
+    val classCommutes = group.count { isClassDay(it.ts) }
     val sundayShare = group.count { dayOfWeek(it.ts) == Calendar.SUNDAY }.toDouble() / group.size
-    if (classMornings < 3) return null
-    val confidence = (0.45 + 0.07 * minOf(classMornings, 5) - 0.15 * sundayShare - 0.3 * spread)
+    if (classCommutes < 3) return null
+    val confidence = (0.45 + 0.07 * minOf(classCommutes, 5) - 0.15 * sundayShare - 0.3 * spread)
         .coerceIn(0.0, 0.95).toFloat()
     val range = group.minOf { it.amount }.toInt().let { lo ->
         group.maxOf { it.amount }.toInt().let { hi ->
@@ -99,8 +100,8 @@ fun deduceFare(
     }
     return Deduction(
         kind = HypothesisKind.FARE,
-        title = "Morning fare · KSh ${amount.toInt()}",
-        evidence = "$classMornings of $distinctDays mornings on class days$range",
+        title = "School fare · KSh ${amount.toInt()}",
+        evidence = "$classCommutes of $distinctDays commute days on class schedule$range",
         confidence = confidence,
         amount = amount,
         category = "Transport",
@@ -183,8 +184,12 @@ data class DraftProfile(
     val recurring: List<Deduction>
 )
 
-fun buildDraft(rows: List<LedgerRow>, isClassDay: (Long) -> Boolean): DraftProfile {
-    val fare = deduceFare(rows, isClassDay)?.takeIf { it.confidence >= DEDUCTION_BAR }
+fun buildDraft(
+    rows: List<LedgerRow>,
+    isClassDay: (Long) -> Boolean,
+    isClassTime: ((Long) -> Boolean)? = null
+): DraftProfile {
+    val fare = deduceFare(rows, isClassDay, isClassTime)?.takeIf { it.confidence >= DEDUCTION_BAR }
     val rent = deduceRent(rows)?.takeIf { it.confidence >= DEDUCTION_BAR }
     return DraftProfile(
         // 22 class days a month — documented assumption, user-editable downstream.

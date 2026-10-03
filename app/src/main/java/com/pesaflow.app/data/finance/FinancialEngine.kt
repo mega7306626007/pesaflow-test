@@ -386,11 +386,12 @@ private fun monthlyLandedFor(
     monthStart: Long
 ): Double {
     return txs.filter {
-        it.type == TransactionType.INCOME && it.dateTimestamp >= monthStart && matchesSource(it, label, kind)
+        it.type == TransactionType.INCOME && !it.isOpening && it.dateTimestamp >= monthStart && matchesSource(it, label, kind)
     }.sumOf { it.amount }
 }
 
 private fun matchesSource(tx: Transaction, label: String, kind: String): Boolean {
+    if (tx.isOpening || tx.isSample) return false
     if (label.isNotBlank() && tx.merchant.contains(label, ignoreCase = true)) return true
     val keys = when {
         kind.contains("HELB") -> listOf("helb")

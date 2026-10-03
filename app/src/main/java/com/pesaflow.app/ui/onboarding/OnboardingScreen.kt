@@ -113,6 +113,8 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
     // downstream, so it asked twice for one number.
     var helbSem by rememberSaveable { mutableStateOf("") }
     var pocket by rememberSaveable { mutableStateOf("") }
+    var mpesaNow by rememberSaveable { mutableStateOf("") }
+    var bankNow by rememberSaveable { mutableStateOf("") }
     var monthlyBudget by rememberSaveable { mutableStateOf("") }
     var foodBudget by rememberSaveable { mutableStateOf("") }
     var feesAmount by rememberSaveable { mutableStateOf("") }
@@ -363,7 +365,7 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                         OutlinedTextField(value = rentGuess, onValueChange = { rentGuess = it }, label = { Text("Rent/hostel per month? (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                         Text("→ your Rent budget + Bills watch.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         rentHintFor(university)?.let { hint ->
-                            Text("Near ${university.trim()}: $hint.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            Text("Rough guide near ${university.trim()} (verify locally): $hint.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                     if ("fare" in visible) {
@@ -426,8 +428,8 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     // Continuous numbering (main format): hidden boxes never leave
                     // gaps — the count follows what you actually see.
                     var qi = 0
-                    OutlinedTextField(value = sponsorMonthly, onValueChange = { sponsorMonthly = it }, label = { Text("${++qi} · Monthly upkeep from home? (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                    Text("→ lands as ledger income + a sponsor source you can track.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(value = sponsorMonthly, onValueChange = { sponsorMonthly = it }, label = { Text("${++qi} · Expected monthly upkeep from home? (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                    Text("→ tracked as expected sponsor income; it is not added to your held balance until received.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(value = airtimeWeekly, onValueChange = { airtimeWeekly = it }, label = { Text("${++qi} · Airtime + data per week? (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                     Text("→ your Airtime budget (×4).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(value = saveTarget, onValueChange = { saveTarget = it }, label = { Text("${++qi} · Want to save monthly? (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
@@ -436,7 +438,7 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                 2 -> {
                     StepArt(R.drawable.ob_money)
                     Text("Pesa ya semester 💰", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("HELB comes in tranches — enter what you expect, plus cash in pocket today.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Expected support is not cash on hand. Enter what you have right now in each pocket; expected income is tracked separately.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     com.pesaflow.app.ui.theme.SegChoice(
                         options = listOf(
                             com.pesaflow.app.ui.theme.SegOption("HELB", "HELB", "🎓"),
@@ -452,8 +454,10 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     } else {
                         Text("Self-sponsored 💪 — pocket cash + anything you log as income carries the semester.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    OutlinedTextField(value = pocket, onValueChange = { pocket = it }, label = { Text("Pocket cash in hand (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                    Text("→ opening cash in your ledger — net worth, balance and planners all move.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(value = pocket, onValueChange = { pocket = it }, label = { Text("Cash you have right now (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = mpesaNow, onValueChange = { mpesaNow = it }, label = { Text("M-Pesa balance right now (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = bankNow, onValueChange = { bankNow = it }, label = { Text("Bank balance right now (KSh)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                    Text("These actual balances seed your ledger. HELB and sponsor amounts above remain expected until they arrive.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(value = feesAmount, onValueChange = { feesAmount = it }, label = { Text("Fees owed (KSh, optional)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                     Text("→ fees reserve. Part of HELB can cover it — we show the uncovered amount.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedButton(onClick = { showFeesDuePicker = true }, modifier = Modifier.fillMaxWidth()) {
@@ -722,7 +726,9 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                     val revTransport = transportDaily.toDoubleOrNull()?.takeIf { it > 0 }?.let { it * 30 to "you" }
                         ?: scan?.monthlyFor("Transport")?.takeIf { it > 0 }?.let { it to "M-Pesa scan" }
                     val revAirtime = airtimeWeekly.toDoubleOrNull()?.takeIf { it > 0 }?.let { it * 4 to "you" }
-                    val revPocket = pocket.toDoubleOrNull()?.takeIf { it > 0 }
+                    val revCash = pocket.toDoubleOrNull()?.takeIf { it > 0 }
+                    val revMpesa = mpesaNow.toDoubleOrNull()?.takeIf { it > 0 }
+                    val revBank = bankNow.toDoubleOrNull()?.takeIf { it > 0 }
                     val revUpkeep = sponsorMonthly.toDoubleOrNull()?.takeIf { it > 0 }
                     val revSave = saveTarget.toDoubleOrNull()?.takeIf { it > 0 }
                     val revFees = feesAmount.toDoubleOrNull()?.takeIf { it > 0 }
@@ -738,8 +744,10 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                             ReviewRow("Rent", revRent?.first?.let { "KSh " + it.toInt() } ?: "—", revRent?.second ?: "skip")
                             ReviewRow("Transport", revTransport?.first?.let { "KSh " + it.toInt() } ?: "—", revTransport?.second ?: "skip")
                             ReviewRow("Airtime", revAirtime?.first?.let { "KSh " + it.toInt() } ?: "—", revAirtime?.second ?: "skip")
-                            ReviewRow("Pocket cash → ledger", revPocket?.let { "KSh " + it.toInt() } ?: "—", if (revPocket != null) "you" else "skip")
-                            ReviewRow("Monthly upkeep → ledger", revUpkeep?.let { "KSh " + it.toInt() } ?: "—", if (revUpkeep != null) "you" else "skip")
+                            ReviewRow("Cash on hand → ledger", revCash?.let { "KSh " + it.toInt() } ?: "—", if (revCash != null) "you" else "skip")
+                            ReviewRow("M-Pesa held → ledger", revMpesa?.let { "KSh " + it.toInt() } ?: "—", if (revMpesa != null) "you" else "skip")
+                            ReviewRow("Bank held → ledger", revBank?.let { "KSh " + it.toInt() } ?: "—", if (revBank != null) "you" else "skip")
+                            ReviewRow("Expected monthly upkeep", revUpkeep?.let { "KSh " + it.toInt() } ?: "—", if (revUpkeep != null) "expected" else "skip")
                             ReviewRow("Savings goal", revSave?.let { "KSh " + it.toInt() } ?: "—", if (revSave != null) "you" else "skip")
                             ReviewRow("Fees bill", revFees?.let { "KSh " + it.toInt() } ?: "—", if (revFees != null) "you" else "skip")
                             ReviewRow(
@@ -863,7 +871,7 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                                     academicYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString(),
                                     semesterStartTimestamp = semesterStartMillis,
                                     semesterEndTimestamp = endMillis,
-                                    startingFunding = pocket.toDoubleOrNull() ?: 0.0,
+                                    startingFunding = listOf(pocket, mpesaNow, bankNow).sumOf { it.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0 },
                                     helbExpected = if (fundSource == "SELF") 0.0 else helbSem.toDoubleOrNull() ?: 0.0,
                                     fundingSource = fundSource,
                                     feesAmount = feesAmount.toDoubleOrNull() ?: 0.0,
@@ -966,6 +974,18 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                             // averages even when they fall inside stated spans.
                             val breakOverrides = appContext.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
                                 .getStringSet("confirmed_break_months", emptySet()) ?: emptySet()
+                            val firstH = firstClassH.toIntOrNull()
+                            val lastH = lastClassH.toIntOrNull()
+                            val timetableTimes = if (
+                                firstH != null && lastH != null && firstH in 5..23 && lastH in firstH..23 &&
+                                "classTimes" in visible
+                            ) {
+                                listOf("Mon", "Tue", "Wed", "Thu", "Fri").associateWith { firstH to lastH }
+                                    .also { com.pesaflow.app.data.schedule.WeekPlan.saveTimes(appContext, it) }
+                            } else {
+                                com.pesaflow.app.data.schedule.WeekPlan.loadTimes(appContext)
+                            }
+                            val timetableDays = timetableTimes.keys
                             val draft = scanResult?.let { scan ->
                                 val periodRows = if (semesterStartMillis > 0L && endMillis > semesterStartMillis) {
                                     scan.parsed.filter { semCal.regimeOf(it.dateTimestamp) == Regime.SESSION }
@@ -977,9 +997,16 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                                         .filter { monthKey(it.dateTimestamp) !in breakOverrides }
                                         .map { LedgerRow(it.amount, it.type, it.category, it.merchant, it.dateTimestamp) },
                                     isClassDay = { ts ->
-                                        val d = java.util.Calendar.getInstance().apply { timeInMillis = ts }
-                                            .get(java.util.Calendar.DAY_OF_WEEK)
-                                        d in java.util.Calendar.MONDAY..java.util.Calendar.FRIDAY
+                                        if (timetableDays.isEmpty()) {
+                                            java.util.Calendar.getInstance().apply { timeInMillis = ts }
+                                                .get(java.util.Calendar.DAY_OF_WEEK) in
+                                                java.util.Calendar.MONDAY..java.util.Calendar.FRIDAY
+                                        } else {
+                                            com.pesaflow.app.data.schedule.timetableDay(ts) in timetableDays
+                                        }
+                                    },
+                                    isClassTime = if (timetableTimes.isEmpty()) null else { ts ->
+                                        com.pesaflow.app.data.schedule.isWithinClassCommuteWindow(ts, timetableTimes)
                                     }
                                 )
                             }
@@ -1024,20 +1051,12 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                             }
                             // School run from step 0: class hours ride Mon–Fri into
                             // the timetable — commute days + peak verdict follow.
-                            val firstH = firstClassH.toIntOrNull()
-                            val lastH = lastClassH.toIntOrNull()
-                            if (firstH != null && lastH != null && "classTimes" in visible) {
-                                com.pesaflow.app.data.schedule.WeekPlan.saveTimes(
-                                    appContext,
-                                    listOf("Mon", "Tue", "Wed", "Thu", "Fri").associateWith { firstH to lastH }
-                                )
-                            }
-                            // Opening money hits the ledger: pocket cash + monthly upkeep
-                            // become INCOME rows so budgets, net worth, reports, planners update.
-                            val upkeep = sponsorMonthly.toDoubleOrNull()?.takeIf { it > 0 } ?: 0.0
+                            // Only money held now seeds opening equity. Expected
+                            // upkeep remains an income source until it actually lands.
                             viewModel.seedOpeningMoney(
                                 pocket.toDoubleOrNull() ?: 0.0,
-                                upkeep
+                                mpesaNow.toDoubleOrNull() ?: 0.0,
+                                bankNow.toDoubleOrNull() ?: 0.0
                             )
                             // First-sync: coded + sure scans confirm themselves
                             // now, so Home opens on real data, not an empty

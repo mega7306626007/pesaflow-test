@@ -265,7 +265,7 @@ fun TransactionsScreen(
                 }
                 item { Spacer(Modifier.height(80.dp)) }
             }
-            val viewIn = sorted.filter { it.type == TransactionType.INCOME && !it.isSample }.sumOf { it.amount }
+            val viewIn = sorted.filter { it.type == TransactionType.INCOME && !it.isSample && !it.isOpening }.sumOf { it.amount }
             val viewOut = sorted.filter { it.type == TransactionType.EXPENSE && !it.isSample }.sumOf { it.amount }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),

@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import com.pesaflow.app.data.analytics.detectRecurring
 import com.pesaflow.app.data.analytics.predictPaydays
 import com.pesaflow.app.data.finance.projectCashFlow
+import com.pesaflow.app.data.income.IncomeSource
+import com.pesaflow.app.data.income.expectedIncomeLandings
 import com.pesaflow.app.data.money.ledgerBalance
 import com.pesaflow.app.data.models.Transaction
 import com.pesaflow.app.data.models.TransactionType
@@ -46,17 +48,26 @@ fun Next30DaysCard(
     hide: Boolean = false,
     // Dynamic horizon: nearest dated inflow (HELB day, allowance day) from
     // the Income tab — the forecast counts down to money, not just month-end.
-    inflowDays: Int? = null
+    inflowDays: Int? = null,
+    incomeSources: List<IncomeSource> = emptyList()
 ) {
     // now captured inside: keying remember on a fresh timestamp recomputed
     // the whole 30-day projection on every recomposition (scroll jank).
-    val projection = remember(transactions, bills) {
+    val projection = remember(transactions, bills, incomeSources) {
         val now = System.currentTimeMillis()
+        val declaredInflows = expectedIncomeLandings(incomeSources, now, 30)
+        val inferredInflows = predictPaydays(transactions, now).filterNot { inferred ->
+            declaredInflows.any { declared ->
+                val sameDate = kotlin.math.abs(declared.third - inferred.third) < 4L * 24 * 60 * 60 * 1000
+                val scale = maxOf(declared.second, inferred.second, 1.0)
+                sameDate && kotlin.math.abs(declared.second - inferred.second) / scale <= 0.15
+            }
+        }
         projectCashFlow(
             balance = ledgerBalance(transactions),
             now = now,
             horizonDays = 30,
-            paydays = predictPaydays(transactions, now),
+            paydays = declaredInflows + inferredInflows,
             bills = bills.filter { it.status != "PAID" && it.paidBy == "ME" },
             recurring = detectRecurring(transactions)
         )
@@ -74,6 +85,25 @@ fun Next30DaysCard(
                 subtitle = "Paydays + bills + subscriptions vs KSh ${if (hide) "••••" else ledgerBalance(transactions).toInt()} held" +
                     (if (!hide && inflowDays != null) " · inflow in $inflowDays day${if (inflowDays == 1) "" else "s"} 📥" else "")
             )
+            val expectedIncome = projection.days
+                .flatMap { day -> day.events.filter { it.amount > 0 }.map { day.dayStart to it } }
+                .take(3)
+            if (expectedIncome.isNotEmpty()) {
+                Text(
+                    "Expected (not guaranteed): " + expectedIncome.joinToString(" · ") { (date, event) ->
+                        val amount = if (hide) "••••" else "KSh ${event.amount.toInt()}"
+                        "${event.label} $amount · ${fmt.format(Date(date))}"
+                    },
+                    style = ppTypography.bodySmall,
+                    color = ppColors.textTertiary
+                )
+            } else {
+                Text(
+                    "No dated income expected in this window; irregular support is not assumed.",
+                    style = ppTypography.bodySmall,
+                    color = ppColors.textTertiary
+                )
+            }
             if (projection.brokeDate != null) {
                 Text(
                     "Goes negative around ${fmt.format(Date(projection.brokeDate))} — low $lowText. Move money or delay spending. ⚠️",

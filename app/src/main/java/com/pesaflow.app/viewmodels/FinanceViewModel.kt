@@ -412,7 +412,20 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     fun resolveApprovalCategory(pending: PendingTransaction, edited: String): String {
         val memorized = com.pesaflow.app.data.ledger.CategoryMemory.lookup(prefs(), pending.merchant)
         val inferred = com.pesaflow.app.data.parsers.MpesaParser.inferCategory(pending.merchant, pending.type)
-        return com.pesaflow.app.data.parsers.PendingPolicy.upgradeOtherCategory(edited, memorized, inferred)
+        val preferences = prefs()
+        val fare = preferences.getString("school_fare_one_way", null)?.toDoubleOrNull() ?: 0.0
+        val classTimes = com.pesaflow.app.data.schedule.WeekPlan.loadTimes(getApplication())
+        val commuteMatched = pending.type == TransactionType.EXPENSE &&
+            com.pesaflow.app.data.schedule.matchesDeclaredCommuteFare(
+                pending.amount,
+                pending.dateTimestamp,
+                fare,
+                classTimes
+            )
+        val finalInference = if (commuteMatched && inferred.equals("Other", ignoreCase = true)) {
+            "Transport"
+        } else inferred
+        return com.pesaflow.app.data.parsers.PendingPolicy.upgradeOtherCategory(edited, memorized, finalInference)
     }
 
 
@@ -586,42 +599,38 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }
 
 
-    // Opening money: pocket cash + monthly upkeep become ledger rows flagged
-    // isOpening (guarded by merchant tag, so re-onboarding never double-logs).
-    // Opening equity: counted in held cash, never in monthly earned income (§7).
-    fun seedOpeningMoney(pocket: Double, monthlyUpkeep: Double) {
+    // Opening money is what the student actually holds now, not expected
+    // sponsor or HELB income. Each account is seeded independently so pocket
+    // balances stay truthful; retries never duplicate an opening row.
+    fun seedOpeningMoney(cash: Double, mpesa: Double, bank: Double) {
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             val existing = repository.allTransactions.first()
-            if (pocket > 0 && existing.none { it.merchant == "Opening balance" && it.type == TransactionType.INCOME }) {
-                repository.insertTransaction(
-                    Transaction(
-                        amount = pocket,
-                        type = TransactionType.INCOME,
-                        category = "Income",
-                        dateTimestamp = now,
-                        merchant = "Opening balance",
-                        description = "Pocket cash from onboarding",
-                        paymentMethod = PaymentMethod.CASH,
-                        accountKind = "CASH",
-                        isOpening = true
+            listOf(
+                Triple("Opening balance", cash, PaymentMethod.CASH),
+                Triple("Opening M-Pesa balance", mpesa, PaymentMethod.MPESA),
+                Triple("Opening bank balance", bank, PaymentMethod.BANK_TRANSFER)
+            ).forEach { (merchant, amount, method) ->
+                if (amount > 0 && existing.none { it.merchant == merchant && it.type == TransactionType.INCOME }) {
+                    repository.insertTransaction(
+                        Transaction(
+                            amount = amount,
+                            type = TransactionType.INCOME,
+                            category = "Income",
+                            dateTimestamp = now,
+                            merchant = merchant,
+                            description = "Actual balance at onboarding",
+                            paymentMethod = method,
+                            accountKind = when (method) {
+                                PaymentMethod.CASH -> "CASH"
+                                PaymentMethod.MPESA -> "M_PESA"
+                                PaymentMethod.BANK_TRANSFER -> "BANK"
+                                else -> "OTHER"
+                            },
+                            isOpening = true
+                        )
                     )
-                )
-            }
-            if (monthlyUpkeep > 0 && existing.none { it.merchant == "Monthly upkeep" && it.type == TransactionType.INCOME }) {
-                repository.insertTransaction(
-                    Transaction(
-                        amount = monthlyUpkeep,
-                        type = TransactionType.INCOME,
-                        category = "Income",
-                        dateTimestamp = now,
-                        merchant = "Monthly upkeep",
-                        description = "Home/sponsor monthly upkeep, in hand",
-                        paymentMethod = PaymentMethod.CASH,
-                        accountKind = "CASH",
-                        isOpening = true
-                    )
-                )
+                }
             }
         }
     }
@@ -1153,6 +1162,48 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     fun restockKitchen(item: KitchenStock) {
         viewModelScope.launch {
             repository.updateKitchenStock(item.copy(qtyLeft = item.qtyFull, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun purchaseKitchenStock(
+        item: KitchenStock,
+        quantity: Double,
+        method: PaymentMethod,
+        onResult: (String?) -> Unit
+    ) {
+        if (!quantity.isFinite() || quantity <= 0) {
+            onResult("Enter a valid quantity, pack size, and price.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val purchased = repository.transact {
+                    val latest = repository.getKitchenStock(item.id) ?: return@transact false
+                    val cost = com.pesaflow.app.data.models.stockTopUpCost(latest, quantity)
+                        ?: return@transact false
+                    val updatedStock = com.pesaflow.app.data.models.stockAfterTopUp(latest, quantity)
+                        ?: return@transact false
+                    repository.updateKitchenStock(updatedStock)
+                    repository.insertTransaction(
+                        Transaction(
+                            amount = cost,
+                            type = TransactionType.EXPENSE,
+                            category = "Food",
+                            dateTimestamp = System.currentTimeMillis(),
+                            merchant = "Food stock: ${latest.name}",
+                            description = "Bought $quantity ${latest.unit}",
+                            paymentMethod = method,
+                            source = TransactionSource.MANUAL
+                        )
+                    )
+                    true
+                }
+                if (purchased) onResult(null)
+                else onResult("Could not calculate the purchase. Check the item, quantity, and shop price.")
+            } catch (error: android.database.SQLException) {
+                android.util.Log.e("FinanceViewModel", "Could not save kitchen stock purchase", error)
+                onResult("Couldn't save the purchase. Your stock and budget were not changed.")
+            }
         }
     }
 

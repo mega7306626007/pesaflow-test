@@ -423,7 +423,8 @@ fun DashboardScreen(
                     transactions = transactions,
                     bills = bills,
                     hide = hideBalances,
-                    inflowDays = com.pesaflow.app.data.income.nextInflowDay(inflowSources)
+                    inflowDays = com.pesaflow.app.data.income.nextInflowDay(inflowSources),
+                    incomeSources = inflowSources
                 )
             }
 
@@ -822,8 +823,11 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(4.dp))
                         val runway = semesterRunway
                         if (runway != null) {
+                            val dailyShortfall = if (runway.daysRemaining > 0 && runway.availableAfterCommitments < 0) {
+                                -runway.availableAfterCommitments / runway.daysRemaining
+                            } else null
                             val safeDaily = if (runway.daysRemaining > 0) {
-                                runway.availableAfterCommitments / runway.daysRemaining
+                                (runway.availableAfterCommitments / runway.daysRemaining).coerceAtLeast(0.0)
                             } else null
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
                                 Text(
@@ -845,13 +849,23 @@ fun DashboardScreen(
                                 )
                                 if (safeDaily != null) {
                                     Text(
-                                        "Daily runway pace: " + if (hideBalances) "••••" else
+                                        "Safe daily runway: " + if (hideBalances) "••••" else
                                             com.pesaflow.app.data.finance.MoneyFormatter.compact(
                                                 com.pesaflow.app.data.finance.Money.of(safeDaily)
                                             ) + "/day",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (safeDaily < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                if (dailyShortfall != null) {
+                                    Text(
+                                        "Shortfall: " + if (hideBalances) "••••" else
+                                            com.pesaflow.app.data.finance.MoneyFormatter.compact(
+                                                com.pesaflow.app.data.finance.Money.of(dailyShortfall)
+                                            ) + "/day needed to cover the current gap",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
                                     )
                                 }
                             }

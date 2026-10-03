@@ -37,11 +37,29 @@ data class IncomeSource(
     // horizon — null. Pure, unit-tested.
     fun daysUntilLanding(nowMs: Long = System.currentTimeMillis()): Int? {
         if (frequency != "MONTHLY" || dayOfMonth !in 1..31) return null
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = nowMs }
-        val today = cal.get(java.util.Calendar.DAY_OF_MONTH)
-        val dim = cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
-        val target = dayOfMonth.coerceAtMost(dim)
-        return if (target >= today) target - today else (dim - today) + target
+        val today = java.util.Calendar.getInstance().apply {
+            timeInMillis = nowMs
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val target = (today.clone() as java.util.Calendar).apply {
+            set(java.util.Calendar.DAY_OF_MONTH, 1)
+            if (dayOfMonth < today.get(java.util.Calendar.DAY_OF_MONTH)) {
+                add(java.util.Calendar.MONTH, 1)
+            }
+            val lastDay = getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+            set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth.coerceAtMost(lastDay))
+        }
+        var days = 0
+        while (today.get(java.util.Calendar.YEAR) != target.get(java.util.Calendar.YEAR) ||
+            today.get(java.util.Calendar.DAY_OF_YEAR) != target.get(java.util.Calendar.DAY_OF_YEAR)
+        ) {
+            today.add(java.util.Calendar.DAY_OF_MONTH, 1)
+            days++
+        }
+        return days
     }
 
     fun frequencyLabel(): String = when (frequency) {
@@ -158,4 +176,34 @@ object IncomeSourceStore {
  * dated (horizon falls back to month/semester bounds). Pure, unit-tested.
  */
 fun nextInflowDay(sources: List<IncomeSource>, nowMs: Long = System.currentTimeMillis()): Int? =
-    sources.mapNotNull { it.daysUntilLanding(nowMs) }.minOrNull()
+    sources.asSequence()
+        .filter { it.kind != "FULIZA" && it.expectedAmount > 0 }
+        .mapNotNull { it.daysUntilLanding(nowMs) }
+        .minOrNull()
+
+/**
+ * Dated monthly income expectations in a forecast horizon. These are user-
+ * declared estimates, not guarantees; undated/irregular sources are omitted.
+ */
+fun expectedIncomeLandings(
+    sources: List<IncomeSource>,
+    nowMs: Long = System.currentTimeMillis(),
+    horizonDays: Int = 30
+): List<Triple<String, Double, Long>> {
+    if (horizonDays <= 0) return emptyList()
+    return sources.mapNotNull { source ->
+        if (source.kind == "FULIZA" || source.expectedAmount <= 0) return@mapNotNull null
+        val days = source.daysUntilLanding(nowMs) ?: return@mapNotNull null
+        if (days >= horizonDays) return@mapNotNull null
+        val label = source.label.ifBlank { source.displayKind() }
+        val due = java.util.Calendar.getInstance().apply {
+            timeInMillis = nowMs
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+            add(java.util.Calendar.DAY_OF_MONTH, days)
+        }.timeInMillis
+        Triple(label, source.expectedAmount, due)
+    }.sortedBy { it.third }
+}

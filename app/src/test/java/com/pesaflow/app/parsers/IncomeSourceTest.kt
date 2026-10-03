@@ -53,6 +53,45 @@ class IncomeSourceTest {
     }
 
     @Test
+    fun `next landing uses actual month and year boundaries`() {
+        val now = java.util.Calendar.getInstance().apply {
+            clear()
+            set(2025, java.util.Calendar.DECEMBER, 31, 18, 0)
+        }.timeInMillis
+        val source = IncomeSource(kind = "PARENT", expectedAmount = 6000.0, frequency = "MONTHLY", dayOfMonth = 15)
+        assertEquals(15, source.daysUntilLanding(now))
+        val due = com.pesaflow.app.data.income.expectedIncomeLandings(listOf(source), now, 30).single()
+        val dueDate = java.util.Calendar.getInstance().apply { timeInMillis = due.third }
+        assertEquals(2026, dueDate.get(java.util.Calendar.YEAR))
+        assertEquals(java.util.Calendar.JANUARY, dueDate.get(java.util.Calendar.MONTH))
+        assertEquals(15, dueDate.get(java.util.Calendar.DAY_OF_MONTH))
+    }
+
+    @Test
+    fun `monthly landing clamps to leap month length and excludes uncertain income`() {
+        val now = java.util.Calendar.getInstance().apply {
+            clear()
+            set(2024, java.util.Calendar.FEBRUARY, 28, 11, 30)
+        }.timeInMillis
+        val clamped = IncomeSource(kind = "JOB", frequency = "MONTHLY", dayOfMonth = 31)
+        assertEquals(1, clamped.daysUntilLanding(now))
+        val forecast = com.pesaflow.app.data.income.expectedIncomeLandings(
+            listOf(
+                clamped.copy(expectedAmount = 8000.0),
+                IncomeSource(kind = "HUSTLE", expectedAmount = 600.0, frequency = "WEEKLY"),
+                IncomeSource(kind = "PARENT", expectedAmount = 9000.0, frequency = "MONTHLY", dayOfMonth = 0),
+                IncomeSource(kind = "FULIZA", expectedAmount = 2000.0, frequency = "MONTHLY", dayOfMonth = 28)
+            ),
+            now,
+            30
+        )
+        assertEquals(1, forecast.size)
+        assertEquals(8000.0, forecast.single().second, 0.001)
+        val date = java.util.Calendar.getInstance().apply { timeInMillis = forecast.single().third }
+        assertEquals(29, date.get(java.util.Calendar.DAY_OF_MONTH))
+    }
+
+    @Test
     fun `no dated sources means no inflow horizon`() {
         val now = System.currentTimeMillis()
         assertNull(

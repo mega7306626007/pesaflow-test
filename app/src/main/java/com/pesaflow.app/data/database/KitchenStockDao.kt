@@ -10,6 +10,9 @@ interface KitchenStockDao {
     @Query("SELECT * FROM kitchen_stock ORDER BY name ASC")
     fun getAllStock(): Flow<List<KitchenStock>>
 
+    @Query("SELECT * FROM kitchen_stock WHERE id = :id")
+    suspend fun getStock(id: String): KitchenStock?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStock(item: KitchenStock)
 

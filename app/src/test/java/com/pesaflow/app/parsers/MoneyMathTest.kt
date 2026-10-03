@@ -110,4 +110,21 @@ class MoneyMathTest {
         )
         assertEquals(13000.0, ledgerBalance(txs), 0.001)
     }
+
+    @Test
+    fun `month income pace excludes opening equity`() {
+        val now = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.DAY_OF_MONTH, 15)
+            set(java.util.Calendar.HOUR_OF_DAY, 12)
+        }.timeInMillis
+        val txs = listOf(
+            Transaction(amount = 5000.0, type = TransactionType.INCOME, category = "Income", dateTimestamp = now, merchant = "Opening balance", isOpening = true),
+            Transaction(amount = 1200.0, type = TransactionType.INCOME, category = "Income", dateTimestamp = now, merchant = "Sponsor")
+        )
+        assertEquals(
+            1200.0,
+            com.pesaflow.app.data.money.monthScopedTotal(txs, TransactionType.INCOME, now),
+            0.001
+        )
+    }
 }
