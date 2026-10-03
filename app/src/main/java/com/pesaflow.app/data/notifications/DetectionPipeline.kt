@@ -47,6 +47,7 @@ internal suspend fun handleDetectedTransaction(context: Context, pending: Pendin
             amount = known.amount,
             type = known.type,
             category = known.category,
+            subcategory = known.subcategory,
             dateTimestamp = known.dateTimestamp,
             merchant = known.displayMerchant.ifBlank { known.merchant },
             description = known.rawText,

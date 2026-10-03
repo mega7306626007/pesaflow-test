@@ -442,11 +442,15 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
                         val contacts = ContactBook.readAll(prefs)
                         ContactBookScreen(
                             contacts = contacts,
-                            onSave = { name, display, rel, cat, scope, notes ->
-                                ContactBook.save(prefs, name, display, rel, cat, scope, notes)
+                            onSave = { name, display, rel, cat, scope, notes, matchTerms ->
+                                ContactBook.save(prefs, name, display, rel, cat, scope, notes, matchTerms)
+                                com.pesaflow.app.data.ledger.saveContactMemory(
+                                    prefs, name, rel, cat, scope, matchTerms
+                                )
                             },
                             onDelete = { name ->
                                 ContactBook.delete(prefs, name)
+                                com.pesaflow.app.data.ledger.deleteContactMemory(prefs, name)
                             }
                         )
                     }

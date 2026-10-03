@@ -550,8 +550,12 @@ fun OnboardingScreen(viewModel: FinanceViewModel, onDone: () -> Unit) {
                                     scanResult = r
                                     // Sender cards: already-named senders never resurface.
                                     val obPrefs = appContext.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
+                                    val knownMemories = com.pesaflow.app.data.ledger.readContactMemories(
+                                        obPrefs.all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+                                    )
                                     senderCards = groupSenderCards(r.parsed, isNamed = {
-                                        MerchantMemory.lookup(obPrefs, it) != null
+                                        MerchantMemory.lookup(obPrefs, it) != null ||
+                                            com.pesaflow.app.data.ledger.hasContactMemory(it, knownMemories)
                                     })
                                     // Break proposal: collapsed-transport months surface
                                     // once for confirm-or-keep — never auto-excluded.
@@ -1334,6 +1338,7 @@ private fun SenderCardRow(card: SenderCard, onSaved: () -> Unit) {
     var label by rememberSaveable(card.merchant) { mutableStateOf("") }
     var cat by rememberSaveable(card.merchant) { mutableStateOf("") }
     var scope by rememberSaveable(card.merchant) { mutableStateOf("BOTH") }
+    var matchTerms by rememberSaveable(card.merchant) { mutableStateOf("") }
     var savedTick by remember { mutableStateOf(false) }
     val fmt = remember { java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()) }
     val span = remember(card) {
@@ -1385,6 +1390,14 @@ private fun SenderCardRow(card: SenderCard, onSaved: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
+            OutlinedTextField(
+                value = matchTerms,
+                onValueChange = { matchTerms = it },
+                label = { Text("Also match names (optional)") },
+                placeholder = { Text("Nancy, Daniel Mayhvjh") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1397,7 +1410,11 @@ private fun SenderCardRow(card: SenderCard, onSaved: () -> Unit) {
             }
             Button(onClick = {
                 val prefs = ctx.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
-                if (saveContactMemory(prefs, card.merchant, label, cat.ifBlank { card.suggestedCategory }, scope)) {
+                if (saveContactMemory(
+                        prefs, card.merchant, label,
+                        cat.ifBlank { card.suggestedCategory }, scope, matchTerms
+                    )
+                ) {
                     // Backfill the legacy maps too so every reader agrees.
                     if (label.isNotBlank()) MerchantMemory.learnAlias(prefs, card.merchant, label)
                     if (cat.isNotBlank()) CategoryMemory.learn(prefs, card.merchant, cat)

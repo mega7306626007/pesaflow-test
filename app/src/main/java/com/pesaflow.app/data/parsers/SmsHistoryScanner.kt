@@ -149,7 +149,7 @@ suspend fun scanRecentSms(
     return SmsScanResult(
         found, resolved, unreadable, income, expense, cats, daysBack, capped,
         byMonth = resolved.groupBy { monthKey(it.dateTimestamp) }.mapValues { it.value.size },
-        topSenders = resolved.groupBy { it.merchant.ifBlank { "Unknown" } }
+        topSenders = resolved.groupBy { it.displayMerchant.ifBlank { it.merchant.ifBlank { "Unknown" } } }
             .mapValues { it.value.size }.toList().sortedByDescending { it.second }.take(5)
     )
 }

@@ -112,4 +112,52 @@ class ContactMemoryTest {
         assertEquals(1, mem.size)
         assertEquals(ContactMemory("Mother", "Upkeep", "IN"), mem["Nancy"])
     }
+
+    @Test
+    fun `match terms resolve parsed names with relationship and category scope`() {
+        val memory = ContactMemory(
+            label = "Brother",
+            category = "Upkeep",
+            scope = "IN",
+            matchTerms = listOf("Nancy", "Daniel Mayhvjh")
+        )
+        val rows = listOf(
+            tx("Nancy Wanjiku", 1200.0, TransactionType.INCOME),
+            tx("Daniel Mayhvjh", 500.0, TransactionType.EXPENSE, "Food"),
+            tx("Danielson Shop", 80.0, TransactionType.INCOME)
+        )
+
+        val result = applyContactMemory(rows, mapOf("primary sender" to memory))
+
+        assertEquals("Nancy Wanjiku · Brother", result[0].displayMerchant)
+        assertEquals("Upkeep", result[0].category)
+        assertEquals("Daniel Mayhvjh · Brother", result[1].displayMerchant)
+        assertEquals("Food", result[1].category)
+        assertEquals("", result[2].displayMerchant)
+    }
+
+    @Test
+    fun `legacy contact book rows become parse-time name rules`() {
+        val memory = readContactMemories(
+            mapOf(
+                "contact_book" to "sender|Sender|Brother|Upkeep|IN|note|0|0|0.0|0.0|Nancy,Daniel Mayhvjh"
+            )
+        )
+        val result = applyContactMemory(
+            listOf(tx("Daniel Mayhvjh", 1200.0, TransactionType.INCOME, "Salary")),
+            memory
+        ).single()
+
+        assertEquals("Upkeep", result.category)
+        assertEquals("Daniel Mayhvjh · Brother", result.displayMerchant)
+    }
+
+    @Test
+    fun `known contact rule recognizes exact names and whole word aliases only`() {
+        val memory = mapOf(
+            "sender" to ContactMemory(label = "Brother", matchTerms = listOf("Nancy"))
+        )
+        assertTrue(com.pesaflow.app.data.ledger.hasContactMemory("Nancy Wanjiku", memory))
+        assertFalse(com.pesaflow.app.data.ledger.hasContactMemory("Nancyland Shop", memory))
+    }
 }

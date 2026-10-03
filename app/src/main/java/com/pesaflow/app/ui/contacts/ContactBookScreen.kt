@@ -24,7 +24,7 @@ import com.pesaflow.app.data.ledger.normalizeContact
 @Composable
 fun ContactBookScreen(
     contacts: List<ContactEntry>,
-    onSave: (name: String, display: String, rel: String, cat: String, scope: String, notes: String) -> Unit,
+    onSave: (name: String, display: String, rel: String, cat: String, scope: String, notes: String, matchTerms: String) -> Unit,
     onDelete: (name: String) -> Unit
 ) {
     var search by remember { mutableStateOf("") }
@@ -51,6 +51,12 @@ fun ContactBookScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+            Text(
+                "Set a relationship and optional matching names here. Rules are applied after SMS parsing to live messages and history scans.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
@@ -80,8 +86,8 @@ fun ContactBookScreen(
         ContactEditDialog(
             initial = null,
             onDismiss = { showAdd = false },
-            onSave = { name, display, rel, cat, scope, notes ->
-                onSave(name, display, rel, cat, scope, notes)
+            onSave = { name, display, rel, cat, scope, notes, matchTerms ->
+                onSave(name, display, rel, cat, scope, notes, matchTerms)
                 showAdd = false
             }
         )
@@ -90,8 +96,8 @@ fun ContactBookScreen(
         ContactEditDialog(
             initial = e,
             onDismiss = { editing = null },
-            onSave = { name, display, rel, cat, scope, notes ->
-                onSave(name, display, rel, cat, scope, notes)
+            onSave = { name, display, rel, cat, scope, notes, matchTerms ->
+                onSave(name, display, rel, cat, scope, notes, matchTerms)
                 editing = null
             }
         )
@@ -121,6 +127,9 @@ private fun ContactRow(
                 if (entry.category.isNotBlank()) {
                     Text("→ ${entry.category}", style = MaterialTheme.typography.bodySmall)
                 }
+                if (entry.matchTerms.isNotBlank()) {
+                    Text("Also matches: ${entry.matchTerms}", style = MaterialTheme.typography.bodySmall)
+                }
                 Text(
                     "${entry.transactionCount} tx · last ${java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(entry.lastSeen))}",
                     style = MaterialTheme.typography.bodySmall
@@ -141,14 +150,14 @@ private fun ContactRow(
 private fun ContactEditDialog(
     initial: ContactEntry?,
     onDismiss: () -> Unit,
-    onSave: (name: String, display: String, rel: String, cat: String, scope: String, notes: String) -> Unit
+    onSave: (name: String, display: String, rel: String, cat: String, scope: String, notes: String, matchTerms: String) -> Unit
 ) {
-    var name by remember { mutableStateOf(initial?.name ?: "") }
     var display by remember { mutableStateOf(initial?.displayName ?: "") }
     var rel by remember { mutableStateOf(initial?.relationship ?: "") }
     var cat by remember { mutableStateOf(initial?.category ?: "") }
     var scope by remember { mutableStateOf(initial?.scope ?: "BOTH") }
     var notes by remember { mutableStateOf(initial?.notes ?: "") }
+    var matchTerms by remember { mutableStateOf(initial?.matchTerms ?: "") }
     var relExpanded by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -190,6 +199,15 @@ private fun ContactEditDialog(
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
+                    value = matchTerms,
+                    onValueChange = { matchTerms = it },
+                    label = { Text("Also match parsed names") },
+                    placeholder = { Text("Nancy, Daniel Mayhvjh") },
+                    supportingText = { Text("Comma-separated names or phrases; matched as whole words after parsing.") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
                     value = cat,
                     onValueChange = { cat = it },
                     label = { Text("Auto-category (e.g. Food, Rent, Upkeep)") },
@@ -220,7 +238,7 @@ private fun ContactEditDialog(
             TextButton(
                 onClick = {
                     val n = if (initial != null) initial.name else normalizeContact(display)
-                    onSave(n, display, rel, cat, scope, notes)
+                    onSave(n, display, rel, cat, scope, notes, matchTerms)
                 },
                 enabled = display.isNotBlank()
             ) { Text("Save") }

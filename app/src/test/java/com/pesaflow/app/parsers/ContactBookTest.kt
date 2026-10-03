@@ -13,6 +13,8 @@ class ContactBookTest {
     fun `relationships list covers common roles`() {
         val rels = ContactBook.relationships()
         assertTrue(rels.contains("Friend"))
+        assertTrue(rels.contains("Brother"))
+        assertTrue(rels.contains("Sister"))
         assertTrue(rels.contains("Family"))
         assertTrue(rels.contains("Landlord"))
         assertTrue(rels.contains("Boss"))
@@ -33,7 +35,8 @@ class ContactBookTest {
             transactionCount = 5,
             lastSeen = 1000L,
             totalIn = 2000.0,
-            totalOut = 500.0
+            totalOut = 500.0,
+            matchTerms = "Nancy,Daniel Mayhvjh"
         )
         assertEquals("samson", e.name)
         assertEquals("Samson", e.displayName)
@@ -44,6 +47,7 @@ class ContactBookTest {
         assertEquals(5, e.transactionCount)
         assertEquals(2000.0, e.totalIn, 0.001)
         assertEquals(500.0, e.totalOut, 0.001)
+        assertEquals("Nancy,Daniel Mayhvjh", e.matchTerms)
     }
 
     @Test
