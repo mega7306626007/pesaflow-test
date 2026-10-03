@@ -28,11 +28,12 @@ interface PendingTransactionDao {
     suspend fun findInWindow(amount: Double, start: Long, end: Long): List<PendingTransaction>
 
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // IGNORE (not REPLACE): same twin-safety as the confirmed ledger.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPendingTransaction(pending: PendingTransaction)
 
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPendingTransactions(pending: List<PendingTransaction>)
 
 

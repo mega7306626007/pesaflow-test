@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pesaflow.app.data.models.TransactionType
 import com.pesaflow.app.data.search.SearchEngine
+import com.pesaflow.app.ui.NavRoutes
 import com.pesaflow.app.R
 import com.pesaflow.app.viewmodels.FinanceViewModel
 import com.pesaflow.app.ui.theme.AtmoWorkspace
@@ -28,8 +29,9 @@ import com.pesaflow.app.ui.theme.TintSearchTeal
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun SearchScreen(viewModel: FinanceViewModel) {
+fun SearchScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {}) {
     val transactions by viewModel.allTransactions.collectAsState()
+    val budgets by viewModel.budgets.collectAsState()
 
     var searchKeyword by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("") }
@@ -161,7 +163,7 @@ fun SearchScreen(viewModel: FinanceViewModel) {
             AtmosphereBand(
                 workspace = AtmoWorkspace.SEARCH,
                 title = "Find anything",
-                subtitle = "Keyword · category · dates"
+                subtitle = "Transactions · budgets · destinations"
             )
             // Search Filters
             Card(
@@ -296,6 +298,69 @@ fun SearchScreen(viewModel: FinanceViewModel) {
 
             // Results Section
             Spacer(modifier = Modifier.height(16.dp))
+            // Go-to destinations + budgets: one keyword searches the whole app,
+            // not just the ledger. Shown only once a keyword is applied.
+            if (hasSearched && appliedKeyword.isNotBlank()) {
+                val kw = appliedKeyword.trim().lowercase()
+                val destinations = listOf(
+                    Triple("Budgets", "budget envelope plan", NavRoutes.BUDGETS),
+                    Triple("Bills", "bill paybill due rent", NavRoutes.BILLS),
+                    Triple("Goals", "goal saving target emergency", NavRoutes.GOALS),
+                    Triple("Transactions", "transaction ledger history", NavRoutes.TRANSACTIONS),
+                    Triple("Insights", "insight analytics trend", NavRoutes.INSIGHTS),
+                    Triple("Semester", "semester fees dates", NavRoutes.SEMESTER),
+                    Triple("University", "university campus funding helb", NavRoutes.UNIVERSITY),
+                    Triple("Meals", "meal food kitchen", NavRoutes.MEALS),
+                    Triple("Debt", "debt owe borrow fuliza", NavRoutes.DEBT),
+                    Triple("PesaBuddy", "buddy help ask explain ai", NavRoutes.BUDDY),
+                    Triple("Settings", "setting preference privacy", NavRoutes.SETTINGS),
+                    Triple("Income", "income salary hustle parent", NavRoutes.INCOME),
+                    Triple("Export", "export csv backup share", NavRoutes.EXPORT),
+                    Triple("Recurring", "recurring subscription", NavRoutes.RECURRING),
+                    Triple("Contacts", "contact person", NavRoutes.CONTACTS),
+                    Triple("Notifications", "notification reminder alert", NavRoutes.NOTIFICATIONS)
+                ).filter { (label, keys, _) ->
+                    kw in label.lowercase() || keys.split(" ").any { kw in it || it in kw }
+                }
+                val matchedBudgets = budgets.filter { it.category.contains(appliedKeyword, ignoreCase = true) }
+                if (destinations.isNotEmpty() || matchedBudgets.isNotEmpty()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Go to", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            matchedBudgets.forEach { b ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "${b.category} budget — KSh ${b.limitAmount.toInt()}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(onClick = { onNavigate(NavRoutes.BUDGETS) }) { Text("Open →") }
+                                }
+                            }
+                            destinations.forEach { (label, _, route) ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = { onNavigate(route) }) { Text("Open →") }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
             if (recentSearches.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     recentSearches.forEach { q ->

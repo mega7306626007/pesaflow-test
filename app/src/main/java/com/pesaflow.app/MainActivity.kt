@@ -392,13 +392,24 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
                 1 -> BudgetsScreen(viewModel = viewModel)
                 2 -> TransactionsScreen(
                     viewModel = viewModel,
-                    onQuickAdd = { quickAddType = it }
+                    onQuickAdd = { quickAddType = it },
+                    onOpenSearch = { selectedTab = 4; moreSection = NavRoutes.SEARCH }
                 )
                 3 -> InsightsScreen(viewModel = viewModel)
                 else -> when (moreSection) {
                     NavRoutes.SETTINGS -> SettingsScreen(viewModel = viewModel)
                     NavRoutes.DEBT -> DebtTrackingScreen(viewModel = viewModel)
-                    NavRoutes.SEARCH -> SearchScreen(viewModel = viewModel)
+                    NavRoutes.SEARCH -> SearchScreen(
+                        viewModel = viewModel,
+                        onNavigate = { route ->
+                            when (route) {
+                                NavRoutes.TRANSACTIONS -> { selectedTab = 2 }
+                                NavRoutes.BUDGETS -> { selectedTab = 1 }
+                                NavRoutes.INSIGHTS -> { selectedTab = 3 }
+                                else -> { selectedTab = 4; moreSection = route }
+                            }
+                        }
+                    )
                     NavRoutes.UNIVERSITY -> UniversityScreen(viewModel = viewModel)
                     NavRoutes.SEMESTER -> SemesterScreen(viewModel = viewModel, onNavigate = { route ->
                         when (route) {
@@ -449,16 +460,19 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
                         val prefs = context.getSharedPreferences("pesaflow_prefs", android.content.Context.MODE_PRIVATE)
                         val contacts = ContactBook.readAll(prefs)
                         val contactRuleScanStatus by viewModel.contactRuleScanStatus.collectAsState()
+                        val contactRescanActive by viewModel.contactRescanActive.collectAsState()
                         ContactBookScreen(
                             contacts = contacts,
                             reprocessStatus = contactRuleScanStatus,
+                            rescanActive = contactRescanActive,
+                            onCancelRescan = { viewModel.cancelContactRescan() },
                             onSave = { name, display, rel, cat, scope, notes, matchTerms ->
                                 val saved = ContactBook.save(prefs, name, display, rel, cat, scope, notes, matchTerms)
                                 if (saved) {
                                     com.pesaflow.app.data.ledger.saveContactMemory(
                                         prefs, name, rel, cat, scope, matchTerms
                                     )
-                                    viewModel.reprocessContactSmsHistory()
+                                    viewModel.reprocessContactSmsHistory(name, matchTerms)
                                 }
                             },
                             onDelete = { name ->

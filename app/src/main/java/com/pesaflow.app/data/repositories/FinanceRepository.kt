@@ -317,63 +317,79 @@ class FinanceRepository(private val database: AppDatabase) {
         }
     }
 
-    suspend fun reclassifySmsRows(rows: List<PendingTransaction>): Pair<Int, Int> {
-        if (rows.isEmpty()) return 0 to 0
-        val pendingRows = database.pendingTransactionDao().getAllPendingTransactions().first()
-            .filter { it.source == TransactionSource.MPESA_SMS }
-        val confirmedRows = database.transactionDao().getAllTransactions().first()
-            .filter { it.source == TransactionSource.MPESA_SMS }
-        val updatedPendingIds = mutableSetOf<String>()
-        val updatedTransactionIds = mutableSetOf<String>()
-        var pendingUpdated = 0
-        var transactionsUpdated = 0
+    // Contact-rule reclassify: only rows matching the saved contact are even
+    // considered (scope), code lookups are indexed maps (not scans), and all
+    // writes land in one DB transaction (one UI refresh, not hundreds).
+    suspend fun reclassifySmsRows(
+        rows: List<PendingTransaction>,
+        onlyMatching: ((PendingTransaction) -> Boolean)? = null
+    ): Pair<Int, Int> {
+        val scoped = (if (onlyMatching == null) rows else rows.filter(onlyMatching))
+            .filter { it.displayCategory.isNotBlank() }
+        if (scoped.isEmpty()) return 0 to 0
+        return transact {
+            val pendingRows = database.pendingTransactionDao().getAllPendingTransactions().first()
+                .filter { it.source == TransactionSource.MPESA_SMS }
+            val confirmedRows = database.transactionDao().getAllTransactions().first()
+                .filter { it.source == TransactionSource.MPESA_SMS }
+            val pendingByCode = pendingRows.mapNotNull { r ->
+                r.sourceTransactionId?.takeIf { it.isNotBlank() }?.let { it to r }
+            }.toMap()
+            val confirmedByCode = confirmedRows.mapNotNull { r ->
+                r.sourceTransactionId?.takeIf { it.isNotBlank() }?.let { it to r }
+            }.toMap()
+            val updatedPendingIds = mutableSetOf<String>()
+            val updatedTransactionIds = mutableSetOf<String>()
+            var pendingUpdated = 0
+            var transactionsUpdated = 0
 
-        rows.filter { it.displayCategory.isNotBlank() }.forEach { parsed ->
-            val code = parsed.sourceTransactionId?.takeIf { it.isNotBlank() }
-            val pending = if (code != null) {
-                pendingRows.firstOrNull { it.sourceTransactionId == code }
-            } else {
-                pendingRows.firstOrNull {
-                    it.sourceTransactionId == null &&
-                        it.amount == parsed.amount &&
-                        it.dateTimestamp == parsed.dateTimestamp &&
-                        it.rawText == parsed.rawText
+            scoped.forEach { parsed ->
+                val code = parsed.sourceTransactionId?.takeIf { it.isNotBlank() }
+                val pending = if (code != null) {
+                    pendingByCode[code]
+                } else {
+                    pendingRows.firstOrNull {
+                        it.sourceTransactionId == null &&
+                            it.amount == parsed.amount &&
+                            it.dateTimestamp == parsed.dateTimestamp &&
+                            it.rawText == parsed.rawText
+                    }
+                }
+                if (pending != null && pending.id !in updatedPendingIds && pending.category != parsed.category) {
+                    database.pendingTransactionDao().updateClassification(
+                        pending.id,
+                        parsed.category,
+                        parsed.displayCategory,
+                        parsed.displayMerchant
+                    )
+                    updatedPendingIds.add(pending.id)
+                    pendingUpdated++
+                }
+
+                val transaction = if (code != null) {
+                    confirmedByCode[code]
+                } else {
+                    confirmedRows.firstOrNull {
+                        it.sourceTransactionId == null &&
+                            it.amount == parsed.amount &&
+                            it.dateTimestamp == parsed.dateTimestamp &&
+                            it.description == parsed.rawText
+                    }
+                }
+                if (transaction != null && transaction.id !in updatedTransactionIds &&
+                    transaction.category != parsed.category
+                ) {
+                    database.transactionDao().updateCategory(
+                        transaction.id,
+                        parsed.category,
+                        System.currentTimeMillis()
+                    )
+                    updatedTransactionIds.add(transaction.id)
+                    transactionsUpdated++
                 }
             }
-            if (pending != null && pending.id !in updatedPendingIds && pending.category != parsed.category) {
-                database.pendingTransactionDao().updateClassification(
-                    pending.id,
-                    parsed.category,
-                    parsed.displayCategory,
-                    parsed.displayMerchant
-                )
-                updatedPendingIds.add(pending.id)
-                pendingUpdated++
-            }
-
-            val transaction = if (code != null) {
-                confirmedRows.firstOrNull { it.sourceTransactionId == code }
-            } else {
-                confirmedRows.firstOrNull {
-                    it.sourceTransactionId == null &&
-                        it.amount == parsed.amount &&
-                        it.dateTimestamp == parsed.dateTimestamp &&
-                        it.description == parsed.rawText
-                }
-            }
-            if (transaction != null && transaction.id !in updatedTransactionIds &&
-                transaction.category != parsed.category
-            ) {
-                database.transactionDao().updateCategory(
-                    transaction.id,
-                    parsed.category,
-                    System.currentTimeMillis()
-                )
-                updatedTransactionIds.add(transaction.id)
-                transactionsUpdated++
-            }
+            pendingUpdated to transactionsUpdated
         }
-        return pendingUpdated to transactionsUpdated
     }
 
 
@@ -395,6 +411,16 @@ class FinanceRepository(private val database: AppDatabase) {
 
 
     suspend fun approvePendingTransaction(pending: PendingTransaction, customizedCategory: String, finalType: TransactionType = pending.type): Transaction {
+        // Milestone guard: a twin that landed while this row waited (double-tap,
+        // approve-after-import, race) must not double-book. Return the twin and
+        // retire this pending row instead of inserting.
+        val code = pending.sourceTransactionId?.takeIf { it.isNotBlank() }
+        if (code != null) {
+            database.transactionDao().findBySourceCode(code)?.let { twin ->
+                deletePendingTransaction(pending.id)
+                return twin
+            }
+        }
         val transaction = Transaction(
             amount = pending.amount,
             type = finalType,

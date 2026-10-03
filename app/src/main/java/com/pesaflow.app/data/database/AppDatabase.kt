@@ -15,7 +15,7 @@ import com.pesaflow.app.data.places.Place
 
 @Database(
     entities = [Transaction::class, PendingTransaction::class, Budget::class, SavingsGoal::class, UniversityProfile::class, Bill::class, Debt::class, MealItem::class, ChamaGroup::class, Belonging::class, KitchenStock::class, UserRhythm::class, MoneyAccount::class, IncomeSource::class, FinancialProfile::class, ContextFact::class, Place::class],
-    version = 23,
+    version = 24,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -77,6 +77,17 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_21_22 = object : Migration(21, 22) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE bills ADD COLUMN paidBy TEXT NOT NULL DEFAULT 'ME'")
+            }
+        }
+        // Milestone: M-Pesa codes become unique. Pre-existing duplicates from
+        // the old approve race are collapsed (earliest kept) before the index
+        // is created, so no upgrade can fail on real user data.
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DELETE FROM transactions WHERE sourceTransactionId IS NOT NULL AND id NOT IN (SELECT MIN(id) FROM transactions WHERE sourceTransactionId IS NOT NULL GROUP BY sourceTransactionId)")
+                db.execSQL("DELETE FROM pending_transactions WHERE sourceTransactionId IS NOT NULL AND id NOT IN (SELECT MIN(id) FROM pending_transactions WHERE sourceTransactionId IS NOT NULL GROUP BY sourceTransactionId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_transactions_sourceTransactionId ON transactions(sourceTransactionId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_pending_transactions_sourceTransactionId ON pending_transactions(sourceTransactionId)")
             }
         }
         // Older onboarding incorrectly seeded expected sponsor upkeep as
@@ -141,7 +152,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "pesaflow_secure_db"
-                ).addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23).fallbackToDestructiveMigrationOnDowngrade().build()
+                ).addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24).fallbackToDestructiveMigrationOnDowngrade().build()
                 INSTANCE = instance
                 instance
             }

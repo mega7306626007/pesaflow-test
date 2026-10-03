@@ -25,6 +25,8 @@ import com.pesaflow.app.data.ledger.normalizeContact
 fun ContactBookScreen(
     contacts: List<ContactEntry>,
     reprocessStatus: String? = null,
+    rescanActive: Boolean = false,
+    onCancelRescan: () -> Unit = {},
     onSave: (name: String, display: String, rel: String, cat: String, scope: String, notes: String, matchTerms: String) -> Unit,
     onDelete: (name: String) -> Unit
 ) {
@@ -59,12 +61,27 @@ fun ContactBookScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
             reprocessStatus?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (rescanActive) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (rescanActive) {
+                        TextButton(onClick = onCancelRescan) { Text("Cancel") }
+                    }
+                }
             }
             OutlinedTextField(
                 value = search,

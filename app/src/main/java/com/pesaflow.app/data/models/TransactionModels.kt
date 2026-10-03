@@ -30,7 +30,12 @@ enum class AppTheme { SYSTEM, LIGHT, DARK, AMOLED }
 
 
 @Serializable
-@Entity(tableName = "transactions")
+@Entity(
+    tableName = "transactions",
+    // Milestone: one M-Pesa code can never exist twice. NULLs (manual/codeless
+    // rows) are exempt by SQLite semantics — only coded rows are constrained.
+    indices = [Index(value = ["sourceTransactionId"], unique = true)]
+)
 data class Transaction(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val amount: Double,
@@ -73,7 +78,10 @@ data class MoneyAccount(
 
 
 @Serializable
-@Entity(tableName = "pending_transactions")
+@Entity(
+    tableName = "pending_transactions",
+    indices = [Index(value = ["sourceTransactionId"], unique = true)]
+)
 data class PendingTransaction(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val amount: Double,

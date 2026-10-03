@@ -41,12 +41,22 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
     private val _contactRuleScanStatus = MutableStateFlow<String?>(null)
     val contactRuleScanStatus: StateFlow<String?> = _contactRuleScanStatus.asStateFlow()
+    private val _contactRescanActive = MutableStateFlow(false)
+    val contactRescanActive: StateFlow<Boolean> = _contactRescanActive.asStateFlow()
     private var contactRuleScanJob: Job? = null
 
-    fun reprocessContactSmsHistory() {
+    fun cancelContactRescan() {
+        contactRuleScanJob?.cancel()
+        contactRuleScanJob = null
+        _contactRescanActive.value = false
+        _contactRuleScanStatus.value = "Rescan cancelled — your rule is saved and applies to new messages."
+    }
+
+    fun reprocessContactSmsHistory(contactName: String = "", matchTerms: String = "") {
         contactRuleScanJob?.cancel()
         contactRuleScanJob = viewModelScope.launch(Dispatchers.IO) {
-            _contactRuleScanStatus.value = "Re-scanning your SMS history and applying contact categories…"
+            _contactRescanActive.value = true
+            _contactRuleScanStatus.value = "Starting SMS rescan…"
             val context = getApplication<Application>()
             if (ContextCompat.checkSelfPermission(
                     context,
@@ -55,15 +65,24 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             ) {
                 _contactRuleScanStatus.value =
                     "Rule saved. Enable SMS access to apply it to existing messages; new scans will use it automatically."
+                _contactRescanActive.value = false
                 return@launch
             }
             try {
                 val scanContext = currentCoroutineContext()
+                // Scope: only rows that could match this contact go through
+                // reclassification — a notes-only edit rescans nothing extra.
+                val needles = ((listOf(contactName) + matchTerms.split(","))
+                    .map { it.trim().lowercase() }.filter { it.isNotBlank() }).toSet()
                 val result = com.pesaflow.app.data.parsers.scanRecentSms(
                     context = context,
                     maxRows = Int.MAX_VALUE,
                     pageSize = 500,
                     sinceTimestamp = 0L,
+                    onProgress = { found, parsed ->
+                        _contactRuleScanStatus.value =
+                            "Scanning SMS history… $found found, $parsed parsed."
+                    },
                     isCancelled = { !scanContext.isActive },
                     persistDerivedSignals = false
                 )
@@ -73,7 +92,11 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                         "Rule saved, but SMS history could not be fully scanned: ${result.error}"
                     return@launch
                 }
-                val (pending, confirmed) = repository.reclassifySmsRows(result.parsed)
+                _contactRuleScanStatus.value =
+                    "Applying “${contactName.ifBlank { "contact" }}” to ${result.parsed.size} parsed rows…"
+                val (pending, confirmed) = repository.reclassifySmsRows(result.parsed) { row ->
+                    needles.isEmpty() || needles.any { row.merchant.lowercase().contains(it) }
+                }
                 val cappedNote = if (result.capped) " Scan limit reached; not all messages were reviewed." else ""
                 _contactRuleScanStatus.value =
                     "Scanned ${result.found} official texts (${result.parsed.size} parsed): recategorized $pending pending and $confirmed confirmed transactions.$cappedNote"
@@ -82,6 +105,9 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             } catch (e: Exception) {
                 _contactRuleScanStatus.value =
                     "Rule saved, but applying it to SMS history failed: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                _contactRescanActive.value = false
+                contactRuleScanJob = null
             }
         }
     }
@@ -437,7 +463,11 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     fun approvePending(pending: PendingTransaction, finalCategory: String, finalType: TransactionType = pending.type) {
         viewModelScope.launch {
             val category = resolveApprovalCategory(pending, finalCategory)
-            val tx = repository.approvePendingTransaction(pending, category, finalType)
+            // Atomic with the twin-check inside approve: a double-tap burst
+            // still books exactly one ledger row.
+            val tx = repository.transact {
+                repository.approvePendingTransaction(pending, category, finalType)
+            }
             pushUndo(Undoable.Approved(pending, tx.id))
             // Approvals are corrections too — teach the engine.
             CategoryMemory.learn(prefs(), tx.merchant, category)

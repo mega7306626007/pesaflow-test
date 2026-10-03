@@ -91,7 +91,8 @@ private fun groupLabel(dayStart: Long, now: Long): String {
 @Composable
 fun TransactionsScreen(
     viewModel: FinanceViewModel,
-    onQuickAdd: (TransactionType) -> Unit = {}
+    onQuickAdd: (TransactionType) -> Unit = {},
+    onOpenSearch: () -> Unit = {}
 ) {
     val transactions by viewModel.allTransactions.collectAsState()
     var editingTx by remember { mutableStateOf<Transaction?>(null) }
@@ -147,6 +148,21 @@ fun TransactionsScreen(
         val g = sorted.groupBy { startOfDay(it.dateTimestamp) }.toSortedMap(compareByDescending { it })
         if (oldestFirst) g.toSortedMap(compareBy { it }) else g
     }
+    // Pagination: first 100 rows render instantly on big histories (2k SMS
+    // imports grouped/sorted on every keystroke); the rest load on tap.
+    var visibleLimit by remember(sorted) { mutableStateOf(100) }
+    val groups = remember(orderedGroups, visibleLimit, oldestFirst) {
+        var shown = 0
+        val out = LinkedHashMap<Long, List<Transaction>>()
+        for ((day, txs) in orderedGroups) {
+            if (shown >= visibleLimit) break
+            val take = txs.take((visibleLimit - shown).coerceAtLeast(0))
+            if (take.isNotEmpty()) out[day] = take
+            shown += take.size
+        }
+        if (oldestFirst) out.toSortedMap(compareBy { it }) else out
+    }
+    val visibleCount = groups.values.sumOf { it.size }
     // One share engine: footer shares the view, bulk bar shares the selection.
     fun shareTxs(list: List<Transaction>) {
         if (list.isEmpty()) return
@@ -161,7 +177,6 @@ fun TransactionsScreen(
         }
         shareContext.startActivity(android.content.Intent.createChooser(intent, "Share transactions"))
     }
-    val groups = orderedGroups
     // Chronological running balance (oldest → newest, samples excluded)
     // regardless of the view's sort direction.
     val runningById = remember(transactions) {
@@ -210,6 +225,12 @@ fun TransactionsScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onOpenSearch) { Text("Search everything 🔍 → budgets, bills, screens") }
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -361,12 +382,22 @@ fun TransactionsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Showing ${sorted.size} · In KSh ${viewIn.toInt()} · Out KSh ${viewOut.toInt()} · Net " + (if (viewIn - viewOut >= 0) "+" else "−") + "KSh ${kotlin.math.abs(viewIn - viewOut).toInt()}",
+                    "Showing $visibleCount of ${sorted.size} · In KSh ${viewIn.toInt()} · Out KSh ${viewOut.toInt()} · Net " + (if (viewIn - viewOut >= 0) "+" else "−") + "KSh ${kotlin.math.abs(viewIn - viewOut).toInt()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
                     TextButton(onClick = { shareTxs(sorted) }) { Text("Share") }
+                }
+                if (visibleCount < sorted.size) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = { visibleLimit += 100 }) { Text("Show 100 more") }
+                        TextButton(onClick = { visibleLimit = sorted.size }) { Text("Show all ${sorted.size}") }
+                    }
                 }
                 // Bulk bar: share or delete the selection. Deletes confirm as a
                 // batch (no per-row undo across N rows) — honest destructive UX.

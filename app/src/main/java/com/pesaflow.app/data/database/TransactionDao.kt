@@ -48,11 +48,14 @@ interface TransactionDao {
     fun getTransactionsByCategoryInTimeframe(start: Long, end: Long): Flow<List<TransactionSummary>>
 
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // IGNORE (not REPLACE): with the unique M-Pesa-code index, a duplicate
+    // insert skips instead of deleting the twin. All callers pre-check by
+    // code; this is the structural backstop.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTransaction(transaction: Transaction)
 
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTransactions(transactions: List<Transaction>)
 
 
