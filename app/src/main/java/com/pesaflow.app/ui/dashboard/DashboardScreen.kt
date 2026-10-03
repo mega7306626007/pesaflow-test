@@ -215,12 +215,12 @@ fun DashboardScreen(
             item {
                 val snap by viewModel.financialSnapshot.collectAsState()
                 val heroLabel = when (snap.primaryHorizon) {
-                    com.pesaflow.app.data.finance.Horizon.TODAY -> "Safe to spend · today"
-                    com.pesaflow.app.data.finance.Horizon.WEEK -> "Safe to spend · this week"
-                    com.pesaflow.app.data.finance.Horizon.UNTIL_NEXT_INCOME -> "Safe to spend · to next income"
-                    com.pesaflow.app.data.finance.Horizon.MONTH -> "Safe to spend · this month"
+                    com.pesaflow.app.data.finance.Horizon.TODAY -> "Flexible money · today"
+                    com.pesaflow.app.data.finance.Horizon.WEEK -> "Flexible money · this week"
+                    com.pesaflow.app.data.finance.Horizon.UNTIL_NEXT_INCOME -> "Flexible money · to next income"
+                    com.pesaflow.app.data.finance.Horizon.MONTH -> "Flexible money · this month"
                     com.pesaflow.app.data.finance.Horizon.SEMESTER ->
-                        if (semesterRunway == null) "Flexible after commitments" else "Available after commitments · term"
+                        if (semesterRunway == null) "Flexible money · after commitments" else "Flexible money · term"
                 }
                 val heroValue = when (snap.primaryHorizon) {
                     com.pesaflow.app.data.finance.Horizon.TODAY -> snap.safeToday
@@ -251,8 +251,8 @@ fun DashboardScreen(
                     availableLabel = heroLabel,
                     availableValue = if (hideBalances) "KSh ••••" else fmt.compact(heroValue),
                     stats = listOf(
-                        "Held" to if (hideBalances) "••••" else fmt.compact(snap.liquid),
-                        "Flexible" to if (hideBalances) "••••" else fmt.compact(snap.flexible)
+                        "Current balance" to if (hideBalances) "••••" else fmt.compact(snap.liquid),
+                        "Flexible money" to if (hideBalances) "••••" else fmt.compact(snap.flexible)
                     ),
                     onHideToggle = { viewModel.setHideBalances(!hideBalances) },
                     hideLabel = if (hideBalances) "Show" else "Hide"
@@ -269,8 +269,26 @@ fun DashboardScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // Money → Freedom → Pressure: nothing disappeared, committed + buffer set aside.
                             Text(
-                                why?.why ?: "Based on your ledger.",
+                                "Current balance  ${fmt.compact(snap.liquid)}  (Recorded)",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "− Committed  ${fmt.compact(snap.committed)}  (bills, debts, fees, goals)",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "− Safety buffer  ${fmt.compact(snap.riskBuffer)}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "= Flexible money  ${fmt.compact(snap.flexible)}  (Calculated)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                why?.why ?: "Based on your recorded ledger. Projections are labelled separately.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

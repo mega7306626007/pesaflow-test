@@ -331,9 +331,9 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
             }
         },
         floatingActionButton = {
-            // The + lives on Home and Transactions only — it must not follow
-            // the user onto Budgets, Insights or More.
-            if (selectedTab == 0 || selectedTab == 1) {
+            // The + lives on Home and Money only — it must not follow
+            // the user onto Plan, Insight or You.
+            if (selectedTab == 0 || selectedTab == 2) {
             FloatingActionButton(
                 onClick = { showSpeedDial = true },
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -344,13 +344,15 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
             }
         },
         bottomBar = {
+            // Home = what matters now · Plan = what am I planning · Money = what happened
+            // Insight = what is changing · You = how PesaFlow understands me.
             com.pesaflow.app.ui.theme.PpBottomBar(
                 items = listOf(
                     com.pesaflow.app.ui.theme.PpNavItem("Home", Icons.Filled.Home),
-                    com.pesaflow.app.ui.theme.PpNavItem("Transactions", Icons.AutoMirrored.Filled.ReceiptLong),
-                    com.pesaflow.app.ui.theme.PpNavItem("Budgets", Icons.Filled.AccountBalanceWallet),
-                    com.pesaflow.app.ui.theme.PpNavItem("Insights", Icons.Filled.Lightbulb),
-                    com.pesaflow.app.ui.theme.PpNavItem("More", Icons.Filled.MoreVert)
+                    com.pesaflow.app.ui.theme.PpNavItem("Plan", Icons.Filled.AccountBalanceWallet),
+                    com.pesaflow.app.ui.theme.PpNavItem("Money", Icons.AutoMirrored.Filled.ReceiptLong),
+                    com.pesaflow.app.ui.theme.PpNavItem("Insight", Icons.Filled.Lightbulb),
+                    com.pesaflow.app.ui.theme.PpNavItem("You", Icons.Filled.Person)
                 ),
                 selectedIndex = selectedTab,
                 onSelect = { i ->
@@ -369,8 +371,8 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
                         when (route) {
                             NavRoutes.SEARCH -> { selectedTab = 4; moreSection = NavRoutes.SEARCH }
                             NavRoutes.INSIGHTS -> { selectedTab = 3 }
-                            NavRoutes.TRANSACTIONS -> { selectedTab = 1 }
-                            NavRoutes.BUDGETS -> { selectedTab = 2 }
+                            NavRoutes.TRANSACTIONS -> { selectedTab = 2 }
+                            NavRoutes.BUDGETS -> { selectedTab = 1 }
                             NavRoutes.SAVINGS -> { selectedTab = 4; moreSection = NavRoutes.SAVINGS }
                             NavRoutes.BILLS -> { selectedTab = 4; moreSection = NavRoutes.BILLS }
                             NavRoutes.MEALS -> { selectedTab = 4; moreSection = NavRoutes.MEALS }
@@ -382,11 +384,11 @@ private fun PesaFlowAppNav(viewModel: FinanceViewModel) {
                         }
                     }
                 )
-                1 -> TransactionsScreen(
+                1 -> BudgetsScreen(viewModel = viewModel)
+                2 -> TransactionsScreen(
                     viewModel = viewModel,
                     onQuickAdd = { quickAddType = it }
                 )
-                2 -> BudgetsScreen(viewModel = viewModel)
                 3 -> InsightsScreen(viewModel = viewModel)
                 else -> when (moreSection) {
                     NavRoutes.SETTINGS -> SettingsScreen(viewModel = viewModel)
