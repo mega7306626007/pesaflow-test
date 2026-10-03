@@ -155,6 +155,17 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                 label = "How are budgets suggested?",
                 body = "Your income and past spending set the starting point. Apply, then adjust — the budget learns as your ledger grows."
             )
+            com.pesaflow.app.ui.theme.ExplainableAmount(
+                amount = "KSh ${financialSnapshot.flexible.toDouble().toInt()}",
+                label = com.pesaflow.app.data.finance.FinancialVocabulary.FLEXIBLE,
+                provenance = com.pesaflow.app.data.finance.Provenance.CALCULATED,
+                breakdown = listOf(
+                    com.pesaflow.app.data.finance.FinancialVocabulary.CURRENT_BALANCE to "KSh ${financialSnapshot.liquid.toDouble().toInt()}",
+                    com.pesaflow.app.data.finance.FinancialVocabulary.COMMITTED to "KSh ${financialSnapshot.committed.toDouble().toInt()}",
+                    "Safety buffer" to "KSh ${financialSnapshot.riskBuffer.toDouble().toInt()}"
+                ),
+                footer = "A budget is a plan, not cash — it can exceed your balance. Flexible money is what is actually safe to use."
+            )
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),

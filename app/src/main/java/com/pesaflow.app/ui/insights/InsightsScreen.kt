@@ -39,6 +39,7 @@ fun InsightsScreen(viewModel: FinanceViewModel) {
     val savingsGoals by viewModel.savingsGoals.collectAsState()
     val bills by viewModel.bills.collectAsState()
     val debts by viewModel.debts.collectAsState()
+    val snapshot by viewModel.financialSnapshot.collectAsState()
     val nlpInputText by viewModel.nlpInputText.collectAsState()
     val extractedNlp by viewModel.extractedNlpTransaction.collectAsState()
     var chartFilter by remember { mutableStateOf<String?>(null) }
@@ -191,7 +192,8 @@ fun InsightsScreen(viewModel: FinanceViewModel) {
                     incomeSources = viewModel.incomeSources.collectAsState().value,
                     // Real persona, not the HOSTEL_COOK default: far commuters
                     // must never hear "walk", non-cooks never hear "cook".
-                    persona = parsePersona(viewModel.getOnboardingAnswers())
+                    persona = parsePersona(viewModel.getOnboardingAnswers()),
+                    heldBalance = snapshot.liquid.toDouble()
                 )
             }
             }

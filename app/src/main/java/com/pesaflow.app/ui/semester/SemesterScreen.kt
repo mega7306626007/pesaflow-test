@@ -121,6 +121,17 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
                 title = "Semester oasis",
                 subtitle = "Funding · runway · fees countdown"
             )
+            com.pesaflow.app.ui.theme.ExplainableAmount(
+                amount = "KSh ${financialSnapshot.flexible.toDouble().toInt()}",
+                label = "Flexible money · term",
+                provenance = com.pesaflow.app.data.finance.Provenance.CALCULATED,
+                breakdown = listOf(
+                    com.pesaflow.app.data.finance.FinancialVocabulary.CURRENT_BALANCE to "KSh ${financialSnapshot.liquid.toDouble().toInt()}",
+                    com.pesaflow.app.data.finance.FinancialVocabulary.COMMITTED to "KSh ${financialSnapshot.committed.toDouble().toInt()}",
+                    "Safety buffer" to "KSh ${financialSnapshot.riskBuffer.toDouble().toInt()}"
+                ),
+                footer = "Semester dates are you-entered (University tab). The app never guesses your calendar — unset dates say so instead of a fake countdown."
+            )
             // Countdown hero
             Card(
                 modifier = Modifier.fillMaxWidth(),
