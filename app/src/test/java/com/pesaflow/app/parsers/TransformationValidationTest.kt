@@ -4,6 +4,7 @@ import com.pesaflow.app.data.finance.MoneyFormatter
 import com.pesaflow.app.data.finance.SnapshotInput
 import com.pesaflow.app.data.finance.balanceBreakdown
 import com.pesaflow.app.data.finance.buildSnapshot
+import com.pesaflow.app.data.finance.instalmentSchedule
 import com.pesaflow.app.data.income.IncomeSource
 import com.pesaflow.app.data.income.expectedIncomeLandings
 import com.pesaflow.app.data.income.nextInflowDay
@@ -133,6 +134,31 @@ class TransformationValidationTest {
         val t = tx(99999.0, TransactionType.INCOME).copy(isSample = true)
         val s = snap(listOf(t))
         assertEquals(0.0, s.liquid.toDouble(), 0.001)
+    }
+
+    @Test fun `instalments split evenly with remainder last`() {
+        val plan = instalmentSchedule(32000.0, 16, 7)
+        assertEquals(16, plan.size)
+        assertTrue(plan.dropLast(1).all { it.amount == 2000.0 })
+        assertEquals(2000.0, plan.last().amount, 0.001)
+        assertEquals(32000.0, plan.sumOf { it.amount }, 0.001)
+        assertEquals(7, plan.first().dueInDays)
+        assertEquals(112, plan.last().dueInDays)
+    }
+
+    @Test fun `instalments keep shilling totals exact`() {
+        val plan = instalmentSchedule(10000.0, 3, 30)
+        assertEquals(3, plan.size)
+        assertEquals(10000.0, plan.sumOf { it.amount }, 0.001)
+        assertEquals(30, plan.first().dueInDays)
+        assertEquals(90, plan.last().dueInDays)
+    }
+
+    @Test fun `instalments reject nonsense`() {
+        assertTrue(instalmentSchedule(0.0, 4, 7).isEmpty())
+        assertTrue(instalmentSchedule(5000.0, 1, 7).isEmpty())
+        assertTrue(instalmentSchedule(5000.0, 4, 0).isEmpty())
+        assertTrue(instalmentSchedule(5000.0, 53, 7).isEmpty())
     }
 
     @Test fun `parent daily fare lands every day`() {

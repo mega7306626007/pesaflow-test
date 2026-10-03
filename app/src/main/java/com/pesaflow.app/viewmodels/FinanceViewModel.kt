@@ -570,6 +570,9 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.deleteTransaction(oldId)
             repository.insertTransaction(tx)
+            // Edited category is ground truth too — autosave it like new
+            // entries so future rows self-categorize (contact-card memory).
+            CategoryMemory.learn(prefs(), tx.merchant, tx.category)
         }
     }
 
@@ -833,6 +836,35 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
     fun deleteBill(id: String) {
         viewModelScope.launch { repository.deleteBill(id) }
+    }
+
+
+    // Instalments: replace one lump bill (fees, wifi) with dated parts so
+    // near-term safe figures reserve this week's share, not the whole lump.
+    // The original is deleted — commitments are replaced, never doubled.
+    fun splitBillIntoInstalments(billId: String, parts: Int, stepDays: Int) {
+        val bill = bills.value.firstOrNull { it.id == billId } ?: return
+        val plan = com.pesaflow.app.data.finance.instalmentSchedule(bill.amount, parts, stepDays)
+        if (plan.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val day = 24L * 60 * 60 * 1000
+            plan.forEach {
+                repository.insertBill(
+                    Bill(
+                        name = "${bill.name} (${it.index}/${it.of})",
+                        amount = it.amount,
+                        dueDate = now + it.dueInDays * day,
+                        category = bill.category,
+                        frequency = if (stepDays >= 28) "MONTHLY" else "WEEKLY",
+                        amountRemaining = it.amount,
+                        paybill = bill.paybill,
+                        paidBy = bill.paidBy
+                    )
+                )
+            }
+            repository.deleteBill(billId)
+        }
     }
 
 

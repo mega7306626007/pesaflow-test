@@ -72,6 +72,7 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
     var showAddDialog by remember { mutableStateOf(false) }
     var showPlanDialog by remember { mutableStateOf(false) }
     var sharingBudget by remember { mutableStateOf<Budget?>(null) }
+    var editingBudget by remember { mutableStateOf<Budget?>(null) }
 
     val now = System.currentTimeMillis()
     val day = 24L * 60 * 60 * 1000
@@ -594,6 +595,21 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                                 style = com.pesaflow.app.ui.theme.ppTypography.bodySmall,
                                 color = com.pesaflow.app.ui.theme.ppColors.textTertiary
                             )
+                            // Parent fare allowance covers this envelope first.
+                            if (budget.category.equals("Transport", ignoreCase = true)) {
+                                incomeSources.firstOrNull {
+                                    (it.kind == "PARENT" || it.kind == "GUARDIAN") &&
+                                        (it.frequency == "DAILY" || it.frequency == "WEEKLY") && it.expectedAmount > 0
+                                }?.let { fare ->
+                                    val monthly = com.pesaflow.app.data.income.IncomeSourceStore.budgetedMonthly(fare).toInt()
+                                    Text(
+                                        "Parent fare (${fare.frequencyLabel()} KSh ${fare.expectedAmount.toInt()} ≈ KSh $monthly/mo) covers this envelope first.",
+                                        style = com.pesaflow.app.ui.theme.ppTypography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
                             if (budget.sharedWith.isNotBlank()) {
                                 val members = budget.sharedWith.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                                 Text(
@@ -604,6 +620,13 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                                 )
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                TextButton(onClick = { editingBudget = budget }) {
+                                    Text(
+                                        "Edit",
+                                        style = com.pesaflow.app.ui.theme.ppTypography.labelMedium,
+                                        color = com.pesaflow.app.ui.theme.ppColors.gold
+                                    )
+                                }
                                 TextButton(onClick = { sharingBudget = budget }) {
                                     Text(
                                         if (budget.sharedWith.isBlank()) "Share" else "Edit share",
@@ -760,6 +783,38 @@ fun BudgetsScreen(viewModel: FinanceViewModel) {
                 }) { Text("Save Plan") }
             },
             dismissButton = { TextButton(onClick = { showPlanDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    editingBudget?.let { b ->
+        var amount by remember { mutableStateOf(b.limitAmount.toInt().toString()) }
+        AlertDialog(
+            onDismissRequest = { editingBudget = null },
+            title = { Text("Edit \"${b.category}\" budget") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "New monthly limit. Saving replaces this envelope — never stacks a twin.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = amount,
+                        onValueChange = { amount = it },
+                        label = { Text("Limit (KSh)") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    amount.toDoubleOrNull()?.takeIf { it > 0 }?.let {
+                        viewModel.upsertBudget(b.category, it, b.type, b.sharedWith)
+                    }
+                    editingBudget = null
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editingBudget = null }) { Text("Cancel") } }
         )
     }
 

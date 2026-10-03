@@ -64,6 +64,7 @@ fun BillsScreen(viewModel: FinanceViewModel) {
         billQuery.isBlank() || b.name.contains(billQuery, ignoreCase = true) || b.category.contains(billQuery, ignoreCase = true)
     var confirmDelete by remember { mutableStateOf<Bill?>(null) }
     var editingBill by remember { mutableStateOf<Bill?>(null) }
+    var splittingBill by remember { mutableStateOf<Bill?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     fun paidWithUndo(bill: Bill) {
@@ -297,7 +298,8 @@ fun BillsScreen(viewModel: FinanceViewModel) {
                                 bill = bill,
                                 onPaid = { paidWithUndo(bill) },
                                 onDelete = { confirmDelete = bill },
-                                onEdit = { editingBill = bill }
+                                onEdit = { editingBill = bill },
+                                onSplit = { splittingBill = bill }
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                         }
@@ -332,7 +334,8 @@ fun BillsScreen(viewModel: FinanceViewModel) {
                                 bill = bill,
                                 onPaid = { paidWithUndo(bill) },
                                 onDelete = { confirmDelete = bill },
-                                onEdit = { editingBill = bill }
+                                onEdit = { editingBill = bill },
+                                onSplit = { splittingBill = bill }
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                         }
@@ -458,6 +461,55 @@ fun BillsScreen(viewModel: FinanceViewModel) {
         )
     }
 
+    splittingBill?.let { bill ->
+        var parts by remember(bill.id) { mutableStateOf("4") }
+        var weekly by remember(bill.id) { mutableStateOf(true) }
+        val n = parts.toIntOrNull() ?: 0
+        val plan = remember(bill.id, n, weekly) {
+            com.pesaflow.app.data.finance.instalmentSchedule(bill.amount, n, if (weekly) 7 else 30)
+        }
+        AlertDialog(
+            onDismissRequest = { splittingBill = null },
+            title = { Text("Split \"${bill.name}\"", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Divide KSh ${bill.amount.toInt()} into dated parts (fees, wifi). The original is replaced — never doubled.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(value = parts, onValueChange = { parts = it.filter { c -> c.isDigit() }.take(2) }, label = { Text("Parts (2–52)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = weekly, onClick = { weekly = true }, label = { Text("Weekly") })
+                        FilterChip(selected = !weekly, onClick = { weekly = false }, label = { Text("Monthly") })
+                    }
+                    if (plan.isNotEmpty()) {
+                        Text(
+                            "${plan.size} × KSh ${plan.first().amount.toInt()}" +
+                                (if (plan.size > 1) " (last KSh ${plan.last().amount.toInt()})" else "") +
+                                " · first due in ${if (weekly) 7 else 30} days",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text("Enter 2–52 parts.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = plan.isNotEmpty(),
+                    onClick = {
+                        viewModel.splitBillIntoInstalments(bill.id, plan.size, if (weekly) 7 else 30)
+                        splittingBill = null
+                    }
+                ) { Text("Split") }
+            },
+            dismissButton = { TextButton(onClick = { splittingBill = null }) { Text("Cancel") } }
+        )
+    }
+
     if (showAddDialog) {
         var name by remember { mutableStateOf("") }
         var amount by remember { mutableStateOf("") }
@@ -544,7 +596,7 @@ private fun BillPayerPicker(selected: String, onSelected: (String) -> Unit) {
 
 
 @Composable
-fun BillCard(bill: Bill, onPaid: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit = {}) {
+fun BillCard(bill: Bill, onPaid: () -> Unit, onDelete: () -> Unit, onEdit: () -> Unit = {}, onSplit: () -> Unit = {}) {
     var isExpanded by remember { mutableStateOf(false) }
     val nowMs = System.currentTimeMillis()
     val dayMs = 24L * 60 * 60 * 1000
@@ -648,6 +700,11 @@ fun BillCard(bill: Bill, onPaid: () -> Unit, onDelete: () -> Unit, onEdit: () ->
                     )
                 }
                 Row(modifier = Modifier.fillMaxWidth().padding(0.dp, 0.dp, 8.dp, 8.dp), horizontalArrangement = Arrangement.End) {
+                    if (bill.status != "PAID") {
+                        TextButton(onClick = onSplit) {
+                            Text("Split", style = com.pesaflow.app.ui.theme.ppTypography.labelMedium, color = com.pesaflow.app.ui.theme.ppColors.gold)
+                        }
+                    }
                     TextButton(onClick = onEdit) {
                         Text("Edit", style = com.pesaflow.app.ui.theme.ppTypography.labelMedium, color = com.pesaflow.app.ui.theme.ppColors.brightBlue)
                     }

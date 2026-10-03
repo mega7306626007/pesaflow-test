@@ -149,6 +149,28 @@ fun SemesterScreen(viewModel: FinanceViewModel, onNavigate: (String) -> Unit = {
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold
                     )
+                    // Fees as instalments: track the lump as a bill, then Split
+                    // it into weeks/months on the Bills tab. Never double-counts:
+                    // the bill replaces the lump in commitments once tracked.
+                    val feeBill = bills.firstOrNull { b ->
+                        listOf(b.name, b.category).any { text ->
+                            text.lowercase().split(Regex("[^a-z0-9]+")).any { it == "fee" || it == "fees" || it == "tuition" }
+                        } && b.status != "PAID"
+                    }
+                    if ((profile?.feesAmount ?: 0.0) > 0 && feeBill == null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(onClick = {
+                            val due = (profile?.feesDueDate ?: 0L).takeIf { it > now } ?: (now + 60L * day)
+                            viewModel.addBill(
+                                "Semester fees", profile?.feesAmount ?: 0.0, due,
+                                "Fees", "ONE_TIME", "", "ME"
+                            )
+                            onNavigate(NavRoutes.BILLS)
+                        }) { Text("Track fees as a bill → split into weeks") }
+                    } else if (feeBill != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(onClick = { onNavigate(NavRoutes.BILLS) }) { Text("Split \"${feeBill.name}\" into weeks →") }
+                    }
                 }
             }
             // Countdown hero
