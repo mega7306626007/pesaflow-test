@@ -92,7 +92,7 @@ fun PesaBuddyAssistant(viewModel: FinanceViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("How am I doing?", "Top spends?", "Run out?", "Bills due?", "Afford 500?", "Laptop by December?", "My stock?", "What I lack?").forEach { s ->
+                    listOf("Explain the app", "Why safe today?", "Why flexible money?", "How am I doing?", "Top spends?", "Run out?", "Bills due?", "Afford 500?", "Laptop by December?", "My stock?", "What I lack?").forEach { s ->
                         AssistChip(onClick = { chatFocused = true; processUserInput(s, viewModel, messages) }, label = { Text(s) })
                     }
                 }
@@ -221,19 +221,16 @@ fun processUserInput(
     userInput: String,
     viewModel: FinanceViewModel,
     messages: MutableState<List<ChatMessage>>,
-    mlAssisted: Boolean = false
+    mlAssisted: Boolean = false,
+    displayInput: String = userInput
 ) {
-    // Add user message to chat
-    messages.value = listOf(
-        ChatMessage(text = userInput, isUser = true),
-        ChatMessage(text = "Thinking...", isUser = false)
-    )
-
     // Intent layer: normalize (append-only synonyms, old branches keep matching),
     // follow-up memory ("and yesterday?"), close-tie disambiguation.
     val qRaw = userInput.lowercase()
     val q = BuddyBrain.normalize(qRaw)
-    BuddyBrain.rewriteFollowUp(qRaw, q)?.let { return processUserInput(it, viewModel, messages) }
+    BuddyBrain.rewriteFollowUp(qRaw, q)?.let {
+        return processUserInput(it, viewModel, messages, displayInput = displayInput)
+    }
     val early: String? = BuddyBrain.disambiguate(q)
     // Trained-model assist: only when the rules draw a blank, once per
     // query. A sure model routes into its verified branch; anything else
@@ -245,7 +242,13 @@ fun processUserInput(
             val suggestion = com.pesaflow.app.data.ml.MlIntentAssist.suggest(ctx, qRaw)
             if (suggestion != null && BuddyBrain.shouldMlAssist(ruleTop, suggestion.confidence)) {
                 BuddyBrain.mlAssistExpansion(suggestion.label)?.let { expansion ->
-                    return processUserInput("$userInput $expansion", viewModel, messages, mlAssisted = true)
+                    return processUserInput(
+                        "$userInput $expansion",
+                        viewModel,
+                        messages,
+                        mlAssisted = true,
+                        displayInput = displayInput
+                    )
                 }
             }
         }
@@ -267,19 +270,25 @@ fun processUserInput(
         return c.get(java.util.Calendar.YEAR) == nowCal.get(java.util.Calendar.YEAR) &&
             c.get(java.util.Calendar.MONTH) == nowCal.get(java.util.Calendar.MONTH)
     }
-    val monthTx = txs.filter { inMonth(it.dateTimestamp) && !it.isSample }
+    val monthTx = txs.filter { inMonth(it.dateTimestamp) && it.dateTimestamp <= nowMs && !it.isSample }
     val monthIncome = monthTx.filter { it.isEarnedIncome() }.sumOf { it.amount }
-    val monthExpense = monthTx.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
-    val todaySpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= dayStart }.sumOf { it.amount }
+    val monthExpenses = monthTx.filter { it.type == TransactionType.EXPENSE }
+    val monthExpense = monthExpenses.sumOf { it.amount }
+    val todaySpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp in dayStart..nowMs }.sumOf { it.amount }
     val weekSpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp in week && com.pesaflow.app.data.time.inPastOrNow(it.dateTimestamp, nowMs) }.sumOf { it.amount }
-    val balance = viewModel.availableBalance.value
+    val financial = viewModel.financialSnapshot.value
+    val balance = financial.liquid.toDouble()
     val saved = viewModel.totalSavings.value
     val goals = viewModel.savingsGoals.value
     val belongings = viewModel.belongings.value
     val pantry = viewModel.kitchenStock.value
     val byCat = monthTx.filter { it.type == TransactionType.EXPENSE }.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
     val topCat = byCat.maxByOrNull { it.value }
-    val budget = viewModel.budgets.value.firstOrNull { it.category == "ALL" }
+    val budgets = viewModel.budgets.value
+    val monthlyBudget = com.pesaflow.app.data.finance.masterOrCategoryTotal(
+        budgets,
+        BudgetType.MONTHLY
+    ).takeIf { it > 0.0 }
     val daysLeft = nowCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH) - nowCal.get(java.util.Calendar.DAY_OF_MONTH) + 1
     val yesterdayStart = dayStart - 24L * 60 * 60 * 1000
     val yesterdaySpend = txs.filter { it.type == TransactionType.EXPENSE && !it.isSample && it.dateTimestamp >= yesterdayStart && it.dateTimestamp < dayStart }.sumOf { it.amount }
@@ -288,14 +297,14 @@ fun processUserInput(
     val externallyFundedBillTotal = openBills.filter { it.paidBy != "ME" }.sumOf { it.amount }
     val openDebts = viewModel.debts.value.filter { it.status != "PAID" }
     val openDebtTotal = openDebts.sumOf { it.amount }
-    // Money already spoken for: unpaid bills + debts I owe. Runway/afford/safe
-    // answer against what's actually free, never the raw balance.
-    val iOweTotal = openDebts.filter { it.direction == "I_OWE" }.sumOf { it.amount }
-    val fulizaOutstanding = com.pesaflow.app.data.finance.fulizaOutstanding(txs)
-    val committed = openBillTotal + iOweTotal + fulizaOutstanding
-    val freeBalance = balance - committed
+    // Use the same obligation, reservation and Fuliza treatment as the
+    // dashboard instead of rebuilding a second, potentially divergent total.
+    val committed = financial.committed.toDouble()
+    val freeBalance = financial.flexible.toDouble()
     val mealCount = viewModel.mealItems.value.size
-    val foodBudgetAmt = viewModel.budgets.value.firstOrNull { it.category == "Food" }?.limitAmount
+    val foodBudgetAmt = budgets.firstOrNull {
+        it.type == BudgetType.MONTHLY && it.category.equals("Food", ignoreCase = true)
+    }?.limitAmount
     val askedCat = byCat.keys.filter { it !in listOf("Food", "Transport", "Rent", "Airtime", "Data") }.firstOrNull { q.contains(it.lowercase()) }
     val nmRaw = viewModel.nickname.value.ifBlank { viewModel.userName.value }
     val nmEx = if (nmRaw.isNotBlank()) " $nmRaw" else ""
@@ -306,7 +315,16 @@ fun processUserInput(
     val persona = com.pesaflow.app.ui.budgets.parsePersona(viewModel.getOnboardingAnswers())
     val farCommute = persona == com.pesaflow.app.ui.budgets.Persona.PARENTS_FAR || persona == com.pesaflow.app.ui.budgets.Persona.RENT_COMMUTE
     val noCook = persona == com.pesaflow.app.ui.budgets.Persona.HOSTEL_NOCOOK
-    val response = early ?: when {
+    val response = BuddyBrain.explainMetric(
+        q,
+        financial.explanations,
+        financial.liquid,
+        monthlyBudget,
+        monthExpense
+    )
+        ?: BuddyBrain.appGuide(q)
+        ?: early
+        ?: when {
         q.contains("hello") || q == "hi" || q.contains("hey") || q.contains("habari") || q.contains("sasa") || q.contains("mambo") ->
             run {
                 // Onboarding answers feed the greeting: your stated worry, if any.
@@ -319,7 +337,7 @@ fun processUserInput(
             }
 
         q.contains("help") || q.contains("what can you") || q.contains("how do i") || q.contains("unaeza") || q.contains("nisaidie") || q.contains("saidia") ->
-            "I answer from your real records: today/yesterday/this week, income, biggest expense, any category ('how much shopping?'), budget status, safe daily spend, savings, balance, bills, debts, even your meal plan. Try 'give me a summary!'"
+            BuddyBrain.appGuide("explain the app") ?: "I answer from your saved records: ask about spending periods, categories, income, budgets, cash, bills, debt, savings, meals, stock or your timetable. Try 'explain the app' for a feature guide, or 'why is flexible money this amount?' for a calculation explanation."
 
         q.contains("thank") || q.contains("asante") || q.contains("poa") ->
             "Karibu sana! 🎉 Keep tracking — small daily records beat big monthly guesses."
@@ -349,9 +367,9 @@ fun processUserInput(
                     val burn = if (weekSpend > 0) weekSpend / elapsed else monthExpense / 30
                     if (burn <= 0 || freeBalance <= 0) {
                         if (balance <= 0) "KSh ${balance.toInt()} left, no burn rate yet — keep logging."
-                        else "KSh ${balance.toInt()} in, but KSh ${committed.toInt()} is already spoken for (bills + deni you owe) — free: KSh ${freeBalance.toInt()}."
+                        else "KSh ${balance.toInt()} held, but KSh ${committed.toInt()} is committed or reserved — flexible: KSh ${freeBalance.toInt()}."
                     } else "At ~KSh ${burn.toInt()}/day, free KSh ${freeBalance.toInt()} lasts ~${(freeBalance / burn).toInt()} days." +
-                        (if (committed > 0) " (after KSh ${committed.toInt()} bills + deni.)" else "")
+                        (if (committed > 0) " (after KSh ${committed.toInt()} commitments and reservations.)" else "")
                 }
             }
 
@@ -367,22 +385,25 @@ fun processUserInput(
             else "This week (Mon–today) ume-spend roughly KSh ${weekSpend.toInt()}. That's about KSh ${(weekSpend / com.pesaflow.app.data.time.daysElapsedInWeek(nowMs).coerceAtLeast(1)).toInt()} per day."
 
         q.contains("budget") || q.contains("bajeti") ->
-            if (budget == null) "You haven't set a monthly budget yet — add one on the Budget tab (use category ALL) and I'll watch it for you."
+            if (monthlyBudget == null) "You haven't set a monthly budget yet — add one on the Budget tab (use category ALL) and I'll watch it for you."
             else {
-                val pct = if (budget.limitAmount > 0) (monthExpense / budget.limitAmount * 100).toInt() else 0
-                "Budget: KSh ${budget.limitAmount.toInt()} monthly. Spent KSh ${monthExpense.toInt()} ($pct%). " +
+                val pct = (monthExpense / monthlyBudget * 100).toInt()
+                "Budget: KSh ${monthlyBudget.toInt()} monthly. Spent KSh ${monthExpense.toInt()} ($pct%). " +
                     if (pct >= 100) "Umekross the line — cut non-essentials for the rest of the month. ⚠️"
                     else if (pct >= 80) "Careful — you're at $pct%. Slow down on variable spending."
                     else "Budget iko safe so far. 👌"
             }
 
         q.contains("safe") || q.contains("daily") || q.contains("per day") || q.contains("kila siku") || q.contains("can i spend") ->
-            if (txs.isEmpty() && budget == null) "Add some income/expenses or set a budget first, then I'll compute your safe daily spend."
+            if (txs.isEmpty() && monthlyBudget == null) "Add some income/expenses or set a budget first, then I'll compute your safe daily spend."
             else {
-                val budgetRemaining = budget?.let { it.limitAmount - monthExpense } ?: freeBalance
-                val daily = buddySafeDaily(budgetRemaining, freeBalance, daysLeft)
-                "You can roughly spend KSh $daily per day for the remaining $daysLeft days, capped by both budget remaining and cash after bills/debts." +
-                    (if (budget == null && committed > 0) " (after KSh ${committed.toInt()} bills + deni.)" else "") +
+                val budgetRemaining = monthlyBudget?.let { (it - monthExpense).coerceAtLeast(0.0) } ?: freeBalance
+                val daily = minOf(
+                    financial.safeToday.toDouble().coerceAtLeast(0.0).toInt(),
+                    buddySafeDaily(budgetRemaining, freeBalance, daysLeft)
+                )
+                "A cautious guide is KSh $daily per day for the remaining $daysLeft days. It is capped by today's safe-to-spend estimate, monthly budget remaining and flexible cash after obligations." +
+                    (if (committed > 0) " (KSh ${committed.toInt()} is committed or reserved.)" else "") +
                     " Hii ni estimate, not a guarantee."
             }
 
@@ -405,8 +426,8 @@ fun processUserInput(
                 val wctx = viewModel.getApplication<android.app.Application>().applicationContext
                 val wnote = com.pesaflow.app.data.parsers.readMpesaBalance(wctx)?.let { " (wallet: KSh ${it.first.toInt()})" } ?: ""
                 if (num == null) "Tell me the price — e.g. 'afford 500?' — and I'll check it against your balance and budget."
-                else if (num <= freeBalance && (budget == null || monthExpense + num <= budget.limitAmount)) "Yes — KSh ${num.toInt()} fits: free KSh ${freeBalance.toInt()}" + (if (budget != null) " and inside budget. ✅" else ". ✅") + wnote
-                else "Careful — KSh ${num.toInt()} vs free KSh ${freeBalance.toInt()}" + (if (committed > 0) " (KSh ${committed.toInt()} tied in bills + deni)" else " (balance KSh ${balance.toInt()})") + (if (budget != null) " and only KSh ${(budget.limitAmount - monthExpense).toInt()} budget left." else ".") + wnote + " Sleep on it? 😴"
+                else if (num <= freeBalance && (monthlyBudget == null || monthExpense + num <= monthlyBudget)) "Yes — KSh ${num.toInt()} fits: flexible KSh ${freeBalance.toInt()}" + (if (monthlyBudget != null) " and inside the monthly envelope. ✅" else ". ✅") + wnote
+                else "Careful — KSh ${num.toInt()} vs flexible KSh ${freeBalance.toInt()}" + (if (committed > 0) " (KSh ${committed.toInt()} committed/reserved)" else " (cash held KSh ${balance.toInt()})") + (if (monthlyBudget != null) " and only KSh ${(monthlyBudget - monthExpense).toInt()} monthly budget left." else ".") + wnote + " Sleep on it? 😴"
             }
 
         q.contains("split") ->
@@ -515,12 +536,12 @@ fun processUserInput(
             }
 
         q.contains("track") || q.contains("on track") || q.contains("am i") || q.contains("progress") ->
-            if (budget == null) "No budget set — add one on the Budget tab and I'll track your progress. 📊"
+            if (monthlyBudget == null) "No monthly budget set — add one on the Budget tab and I'll track your progress. 📊"
             else {
-                val pct = if (budget.limitAmount > 0) (monthExpense / budget.limitAmount * 100).toInt() else 0
+                val pct = (monthExpense / monthlyBudget * 100).toInt()
                 val daysInMonth = nowCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
                 val dayOfMonth = nowCal.get(java.util.Calendar.DAY_OF_MONTH)
-                val expected = budget.limitAmount * dayOfMonth / daysInMonth
+                val expected = monthlyBudget * dayOfMonth / daysInMonth
                 val diff = monthExpense - expected
                 if (monthExpense <= expected) "On track! You've spent KSh ${monthExpense.toInt()} vs KSh ${expected.toInt()} expected by day $dayOfMonth. $pct% of budget. ✅"
                 else "Over by KSh ${diff.toInt()} (KSh ${monthExpense.toInt()} vs KSh ${expected.toInt()} expected). $pct% used with $daysLeft days left. ⚠️"
@@ -528,20 +549,36 @@ fun processUserInput(
 
         q.contains("compare") || q.contains("vs last") || q.contains("difference") ->
             run {
-                val ref = (nowCal.clone() as java.util.Calendar).apply { add(java.util.Calendar.MONTH, -1) }
+                val ref = (nowCal.clone() as java.util.Calendar).apply {
+                    add(java.util.Calendar.MONTH, -1)
+                    set(
+                        java.util.Calendar.DAY_OF_MONTH,
+                        minOf(
+                            nowCal.get(java.util.Calendar.DAY_OF_MONTH),
+                            getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+                        )
+                    )
+                }
+                val previousMonthStart = (ref.clone() as java.util.Calendar).apply {
+                    set(java.util.Calendar.DAY_OF_MONTH, 1)
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }.timeInMillis
                 val lastMonthExp = txs.filter {
                     it.type == TransactionType.EXPENSE && !it.isSample &&
-                        java.util.Calendar.getInstance().apply { timeInMillis = it.dateTimestamp }.let { c ->
-                            c.get(java.util.Calendar.YEAR) == ref.get(java.util.Calendar.YEAR) &&
-                                c.get(java.util.Calendar.MONTH) == ref.get(java.util.Calendar.MONTH)
-                        }
+                        it.dateTimestamp >= previousMonthStart && it.dateTimestamp <= ref.timeInMillis
                 }.sumOf { it.amount }
-                if (lastMonthExp <= 0) "No data from last month to compare — keep logging! 📊"
+                if (monthExpenses.isEmpty()) "Not enough current-month expense records to compare; missing records are not evidence of zero spending. Log or scan this month's transactions first. 📊"
+                else if (lastMonthExp <= 0) "No data from the matching days last month to compare — keep logging! 📊"
                 else {
                     val diff = monthExpense - lastMonthExp
                     val pct = ((diff / lastMonthExp) * 100).toInt()
-                    if (diff <= 0) "This month: KSh ${monthExpense.toInt()} vs last month KSh ${lastMonthExp.toInt()}. You're ${-pct}% down! 🎉"
-                    else "This month: KSh ${monthExpense.toInt()} vs last month KSh ${lastMonthExp.toInt()}. You're up $pct% — watch ${topCat?.key ?: "spending"}. ⚠️"
+                    val throughDay = nowCal.get(java.util.Calendar.DAY_OF_MONTH)
+                    val note = "Recorded spending through day $throughDay this month vs the same number of calendar days last month; this reflects ledger entries, not necessarily complete SMS history. "
+                    if (diff <= 0) note + "This month: KSh ${monthExpense.toInt()} vs last month KSh ${lastMonthExp.toInt()} (${-pct}% lower)."
+                    else note + "This month: KSh ${monthExpense.toInt()} vs last month KSh ${lastMonthExp.toInt()} ($pct% higher) — watch ${topCat?.key ?: "spending"}."
                 }
             }
 
@@ -605,14 +642,15 @@ fun processUserInput(
                     val daysLeft = ((target - now) / (24L * 60 * 60 * 1000)).coerceAtLeast(1)
                     val savedAlready = goals.filter { it.targetTimestamp <= target }.sumOf { it.currentAmount }
                     val remaining = (price - savedAlready).coerceAtLeast(0.0)
-                    val safePool = (budget?.let { (it.limitAmount - monthExpense).coerceAtLeast(0.0) } ?: balance.coerceAtLeast(0.0))
+                    val budgetPool = monthlyBudget?.let { (it - monthExpense).coerceAtLeast(0.0) } ?: freeBalance
+                    val safePool = minOf(budgetPool, freeBalance)
                     val surplusPerDay = (safePool / daysLeft).toInt()
                     val neededPerDay = (remaining / daysLeft).toInt()
                     if (remaining <= 0) {
-                        "You've already saved KSh ${savedAlready.toInt()} — that covers KSh ${price.toInt()}! You can buy it now. ✅"
+                        "Your goals record KSh ${savedAlready.toInt()} toward this KSh ${price.toInt()} target. Check that amount is available to withdraw before buying. ✅"
                     } else if (neededPerDay <= surplusPerDay && surplusPerDay > 0) {
-                        "Yes, possible! Save KSh $neededPerDay/day for $daysLeft days. Your safe daily spend is KSh $surplusPerDay, so save the difference. 💪"
-                    } else if (neededPerDay <= (balance / daysLeft).toInt()) {
+                        "Yes, the target fits the current plan: set aside KSh $neededPerDay/day for $daysLeft days. This uses flexible cash after commitments and the monthly envelope. 💪"
+                    } else if (neededPerDay <= (freeBalance / daysLeft).toInt()) {
                         "Tight but doable — save KSh $neededPerDay/day. You'd need to cut ${topCat?.key ?: "spending"} by that much. 🤔"
                     } else {
                         "KSh ${price.toInt()} by ${java.text.SimpleDateFormat("MMM", java.util.Locale.US).format(java.util.Date(target))} needs KSh $neededPerDay/day. That's more than your surplus of KSh $surplusPerDay/day. Consider extending the deadline or cutting costs. ⚠️"
@@ -637,9 +675,9 @@ fun processUserInput(
                 val expected = appSources.sumOf { com.pesaflow.app.data.income.IncomeSourceStore.budgetedMonthly(it) }
                 val declared = appSources.takeIf { it.isNotEmpty() }
                     ?.joinToString(", ") { it.displayKind() + if (it.expectedAmount > 0) " " + it.expectedAmount.toInt() + " " + it.frequencyLabel() else "" }
-                "This month's income: KSh ${viewModel.monthlyIncome.value.toInt()}." +
+                "Earned income recorded this month: KSh ${viewModel.monthlyIncome.value.toInt()}." +
                     (topIn?.let { " Mostly: ${it.key} KSh ${it.value.toInt()}." } ?: " Log income to see where it comes from.") +
-                    (if (expected > 0) " Expecting ~KSh ${expected.toInt()} (${declared ?: "declared sources"})." else "")
+                    (if (expected > 0) " Declared sources total ~KSh ${expected.toInt()}/month (${declared ?: "declared sources"}); this is an expectation, not cash held or a guaranteed next payment." else "")
             }
 
         userInput.lowercase().contains("spend") || userInput.lowercase().contains("burn") ||
@@ -800,6 +838,6 @@ fun processUserInput(
     BuddyBrain.classify(q).firstOrNull()?.takeIf { it.conf >= 0.5f }?.let { BuddyMemory.lastIntent = it.name }
     // Append, don't wipe: keep the conversation, drop the stale "Thinking...".
     messages.value = (messages.value.filterNot { !it.isUser && it.text == "Thinking..." } +
-        listOf(ChatMessage(text = userInput, isUser = true), ChatMessage(text = response, isUser = false))
+        listOf(ChatMessage(text = displayInput, isUser = true), ChatMessage(text = response, isUser = false))
         ).takeLast(40)
 }

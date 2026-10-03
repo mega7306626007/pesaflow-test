@@ -1,5 +1,10 @@
 package com.pesaflow.app.ui.dashboard
 
+import com.pesaflow.app.data.finance.DataQuality
+import com.pesaflow.app.data.finance.FinancialSnapshot
+import com.pesaflow.app.data.finance.MetricExplanation
+import com.pesaflow.app.data.finance.MoneyFormatter
+
 // PesaBuddy intent layer: scored multilingual intents over the keyword chain.
 // Three jobs: (1) synonym expansion (append-only, never rewrites — zero
 // regression risk to the existing branches), (2) entity extraction (amounts
@@ -10,6 +15,110 @@ object BuddyMemory {
 }
 
 object BuddyBrain {
+
+    private val FEATURE_GUIDES = listOf(
+        listOf("transaction", "ledger", "sms", "mpesa", "history", "import") to
+            "Transactions: review parsed SMS, correct categories, add manual entries, and inspect your ledger. SMS history scanning is read-only until rows are queued or confirmed.",
+        listOf("budget", "envelope", "daily plan", "weekly plan") to
+            "Budgets: set daily, weekly, monthly or semester limits, review category envelopes, and use the calculator for suggestions. Suggestions are plans, not extra money.",
+        listOf("income", "helb", "sponsor", "expected money") to
+            "Income: record where money comes from and its expected amount/date. Expected income is a forecast; it does not increase cash held until it lands and is logged.",
+        listOf("bill", "obligation", "payer") to
+            "Bills: record due dates, remaining amounts and who pays. Only bills assigned to you should reduce your own available plan.",
+        listOf("debt", "fuliza", "owe") to
+            "Debt: track money you owe or are owed. Fuliza draws count as cash received but remain borrowing, not earned income; repayments reduce the tracked balance.",
+        listOf("saving", "goal", "net worth", "assets") to
+            "Savings and Net Worth: track goals, savings, investments, assets and liabilities. A transfer into savings changes where money is held; it is not everyday spending.",
+        listOf("meal", "menu", "recipe", "food plan") to
+            "Meal Planner: save meals and prices, use your food budget to generate plans, and account for kitchen stock. It won't assume a food budget when you haven't set one.",
+        listOf("stock", "pantry", "kitchen", "unga") to
+            "Kitchen Stock: record quantities, prices and use rates to estimate when staples run out and what a refill may cost.",
+        listOf("things", "belonging", "need to buy", "own what") to
+            "My Things: track what you already own and what you still need, with estimated costs and priorities.",
+        listOf("university", "campus", "semester", "timetable", "lecture", "commute") to
+            "University and Semester: save campus details, timetable and semester dates, then use the student planner for term cash flow and commute-aware guidance.",
+        listOf("analytics", "chart", "report", "insight", "trend") to
+            "Analytics and Reports: explore logged spending, category trends, period comparisons and cash-flow explanations. Comparisons need records in both periods; missing history is not treated as zero evidence.",
+        listOf("contact", "nancy", "name rule", "categorize people") to
+            "Contact Book: save a relationship/category rule and optional alternative names. Parsed messages are matched after parsing, with separate money-in/out scope."
+    )
+
+    fun appGuide(question: String): String? {
+        val q = question.lowercase()
+        val asksOverview = listOf(
+            "explain the app", "explain this app", "entire app", "whole app",
+            "what can this app", "what can you do", "how does this app work",
+            "what can i do", "what does this app do", "how does the app work",
+            "show me around", "app guide", "all features"
+        ).any(q::contains)
+        if (asksOverview) {
+            return "PesaFlow brings your student money tools together: Home shows cash and safe-to-spend; Transactions holds your ledger and SMS review; Budgets sets spending limits; Insights and Analytics explain recorded patterns. " +
+                "More contains Income, Bills, Debt, Savings/Goals, Meal Planner, Kitchen Stock, My Things, University/Semester, Reports, Net Worth, Contact Book, Settings and data tools. " +
+                "I can explain a screen or a figure using your saved records—ask, for example, “why is flexible money KSh…?” or “where do I set who pays this bill?”"
+        }
+        val asksForGuidance = listOf(
+            "how do i", "how to", "where do i", "where can i", "explain",
+            "what is", "how does", "how can i use"
+        ).any(q::contains)
+        if (!asksForGuidance) return null
+        val guide = FEATURE_GUIDES.firstOrNull { (terms, _) -> terms.any(q::contains) }
+        return guide?.second
+    }
+
+    fun explainMetric(question: String, snapshot: FinancialSnapshot): String? =
+        explainMetric(question, snapshot.explanations, snapshot.liquid)
+
+    fun explainMetric(
+        question: String,
+        explanations: Map<String, MetricExplanation>,
+        liquid: com.pesaflow.app.data.finance.Money,
+        monthlyBudget: Double? = null,
+        monthExpenses: Double = 0.0
+    ): String? {
+        val q = question.lowercase()
+        val asksWhy = listOf(
+            "why", "how come", "where does", "where did", "based on what",
+            "what goes into", "explain", "formula", "calculated", "calculation"
+        ).any(q::contains)
+        if (!asksWhy) return null
+
+        val target = when {
+            listOf("safe today", "safe to spend", "safe-to-spend", "spend today", "daily safe", "daily allowance").any(q::contains) -> "safeToday"
+            listOf("flexible", "free money", "money left", "available to plan").any(q::contains) -> "flexible"
+            listOf("forecast", "projected", "month end", "end of month").any(q::contains) -> "forecast"
+            listOf("net worth", "wealth").any(q::contains) -> "netWorth"
+            listOf("budget", "envelope").any(q::contains) -> "budget"
+            listOf("balance", "cash held", "liquid").any(q::contains) -> "liquid"
+            else -> null
+        }
+        if (target == null) {
+            return "Which figure should I explain—cash held, flexible money, safe to spend, month-end forecast, budget progress, or net worth? I won't guess which number you mean."
+        }
+        if (target == "liquid") {
+            return "Cash held is the net of recognized money movements in your ledger: recorded inflows add and outflows subtract. The current ledger does not yet keep opening-upkeep cash in a separate equity account, so imported history can affect this figure. " +
+                "It can differ from a current M-Pesa SMS balance if messages are pending, another wallet is missing, or records haven't been reconciled. " +
+                "The current ledger figure is ${MoneyFormatter.compact(liquid)}."
+        }
+        if (target == "budget") {
+            if (monthlyBudget == null) return "There is no monthly budget envelope set, so a budget progress figure should not be shown yet. Daily, weekly, semester and annual budgets are separate periods."
+            val remaining = monthlyBudget - monthExpenses
+            val percent = (monthExpenses / monthlyBudget * 100).toInt()
+            return "Monthly budget progress uses the monthly ALL envelope when set; otherwise it uses the sum of monthly category envelopes (not daily or weekly limits). " +
+                "The envelope is ${MoneyFormatter.compact(com.pesaflow.app.data.finance.Money.of(monthlyBudget))}; recorded expenses this month are ${MoneyFormatter.compact(com.pesaflow.app.data.finance.Money.of(monthExpenses))}; " +
+                "that is $percent% used and ${MoneyFormatter.compact(com.pesaflow.app.data.finance.Money.of(remaining))} remaining. Only expenses recorded in the ledger are counted."
+        }
+        val explanation: MetricExplanation = explanations[target] ?: return null
+        val quality = when (explanation.quality) {
+            DataQuality.FULL -> "Evidence: fuller history."
+            DataQuality.PARTIAL -> "Evidence: partial history; treat this as an estimate."
+            DataQuality.SPARSE -> "Evidence: sparse history; treat this as a rough estimate, not a promise."
+        }
+        val contributors = explanation.contributors.takeIf { it.isNotEmpty() }
+            ?.joinToString("; ")?.let { " Inputs: $it." }.orEmpty()
+        val basis = explanation.basis.takeIf { it.isNotBlank() }?.let { " Basis: $it." }.orEmpty()
+        return "${explanation.label} is ${MoneyFormatter.compact(explanation.headline)} (${explanation.horizon}). " +
+            "${explanation.why}$contributors$basis $quality"
+    }
 
     // Intents whose follow-ups accept a day entity ("and yesterday?").
     private val DAY_INTENTS = setOf("spend", "week", "summary", "balance", "budget", "food", "transport")

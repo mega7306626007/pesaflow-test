@@ -4,6 +4,7 @@ import com.pesaflow.app.data.time.addDays
 import com.pesaflow.app.data.time.changeVsPrevious
 import com.pesaflow.app.data.time.daysElapsedInWeek
 import com.pesaflow.app.data.time.inPastOrNow
+import com.pesaflow.app.data.time.KenyaTime
 import com.pesaflow.app.data.time.mondayIndex
 import com.pesaflow.app.data.time.monthRange
 import com.pesaflow.app.data.time.previousRollingDays
@@ -17,17 +18,35 @@ import com.pesaflow.app.data.time.yesterdayRange
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.Calendar
+import java.util.TimeZone
+import java.time.Instant
 
 
 /** Canonical week/day windows: midnight boundaries, Monday weeks, no leaks. */
 class TimeWindowsTest {
 
-    /** Local 2026-09-07 is a Monday; all dates built in-device-local time. */
+    /** Build wall-clock dates in Kenya time, independent of the test host. */
     private fun at(y: Int, m: Int, d: Int, h: Int = 12, min: Int = 0): Long {
-        return Calendar.getInstance().apply {
+        return KenyaTime.calendarAt(0L).apply {
+            clear()
             set(y, m, d, h, min, 0)
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
+    }
+
+    @Test
+    fun `time windows stay in Nairobi when device timezone differs`() {
+        val original = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"))
+            val instant = Instant.parse("2026-09-07T21:30:00Z").toEpochMilli()
+            val today = todayRange(instant)
+
+            assertEquals(Instant.parse("2026-09-07T21:00:00Z").toEpochMilli(), today.startInclusive)
+            assertEquals(Instant.parse("2026-09-08T21:00:00Z").toEpochMilli(), today.endExclusive)
+        } finally {
+            TimeZone.setDefault(original)
+        }
     }
 
     @Test

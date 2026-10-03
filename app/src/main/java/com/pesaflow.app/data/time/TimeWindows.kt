@@ -3,7 +3,7 @@ package com.pesaflow.app.data.time
 import java.util.Calendar
 
 // Single source of truth for day/week windows. Every figure that says
-// "today", "this week" or "last week" derives from here: local-midnight
+// "today", "this week" or "last week" derives from here: Nairobi-midnight
 // boundaries, Monday-first weeks, strict [start, end) ranges. Pure Kotlin,
 // fully unit-tested.
 data class TimeRange(val startInclusive: Long, val endExclusive: Long) {
@@ -13,7 +13,7 @@ data class TimeRange(val startInclusive: Long, val endExclusive: Long) {
 
     operator fun contains(ts: Long): Boolean = ts >= startInclusive && ts < endExclusive
 
-    /** Local-midnight starts of each calendar day covered by this range. */
+    /** Nairobi-midnight starts of each calendar day covered by this range. */
     fun days(): List<Long> {
         val out = mutableListOf<Long>()
         var cursor = startInclusive
@@ -25,9 +25,9 @@ data class TimeRange(val startInclusive: Long, val endExclusive: Long) {
     }
 }
 
-/** Local midnight starting the calendar day that contains [ts]. */
+/** Nairobi midnight starting the calendar day that contains [ts]. */
 fun startOfDay(ts: Long): Long {
-    val c = Calendar.getInstance().apply { timeInMillis = ts }
+    val c = KenyaTime.calendarAt(ts)
     c.set(Calendar.HOUR_OF_DAY, 0)
     c.set(Calendar.MINUTE, 0)
     c.set(Calendar.SECOND, 0)
@@ -37,18 +37,18 @@ fun startOfDay(ts: Long): Long {
 
 /** Calendar-day arithmetic (DST-safe): [days] may be negative. */
 fun addDays(ts: Long, days: Int): Long {
-    val c = Calendar.getInstance().apply { timeInMillis = ts }
+    val c = KenyaTime.calendarAt(ts)
     c.add(Calendar.DAY_OF_MONTH, days)
     return c.timeInMillis
 }
 
 /** Monday-first weekday index 0..6. */
 fun mondayIndex(ts: Long): Int {
-    val dow = Calendar.getInstance().apply { timeInMillis = ts }.get(Calendar.DAY_OF_WEEK)
+    val dow = KenyaTime.calendarAt(ts).get(Calendar.DAY_OF_WEEK)
     return (dow + 5) % 7
 }
 
-/** Local midnight starting the Monday of the calendar week containing [ts]. */
+/** Nairobi midnight starting the Monday of the calendar week containing [ts]. */
 fun startOfWeek(ts: Long): Long = addDays(startOfDay(ts), -mondayIndex(ts))
 
 /** Today, 00:00 inclusive to tomorrow 00:00 exclusive. */
@@ -59,7 +59,7 @@ fun todayRange(now: Long): TimeRange {
 
 /** Current calendar month: the 1st 00:00 to the 1st of next month. */
 fun monthRange(now: Long): TimeRange {
-    val c = Calendar.getInstance().apply { timeInMillis = now }
+    val c = KenyaTime.calendarAt(now)
     c.set(Calendar.DAY_OF_MONTH, 1)
     c.set(Calendar.HOUR_OF_DAY, 0)
     c.set(Calendar.MINUTE, 0)
@@ -72,7 +72,7 @@ fun monthRange(now: Long): TimeRange {
 
 /** Current calendar year: Jan 1 00:00 to next Jan 1. */
 fun yearRange(now: Long): TimeRange {
-    val c = Calendar.getInstance().apply { timeInMillis = now }
+    val c = KenyaTime.calendarAt(now)
     c.set(Calendar.MONTH, Calendar.JANUARY)
     c.set(Calendar.DAY_OF_MONTH, 1)
     c.set(Calendar.HOUR_OF_DAY, 0)
